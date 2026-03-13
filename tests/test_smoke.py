@@ -1,0 +1,230 @@
+"""E2E smoke tests for rdt-cli — requires working network.
+
+These tests hit the real Reddit JSON API. No auth required for most
+public endpoints.
+
+Run: uv run pytest tests/test_smoke.py -v -m smoke
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from click.testing import CliRunner
+
+from rdt_cli.cli import cli
+
+smoke = pytest.mark.smoke
+runner = CliRunner()
+
+
+def _invoke(*args):
+    return runner.invoke(cli, list(args))
+
+
+def _invoke_json(*args):
+    """Invoke with --json and parse output."""
+    result = runner.invoke(cli, [*args, "--json"])
+    try:
+        data = json.loads(result.output) if result.exit_code == 0 else None
+    except json.JSONDecodeError:
+        data = None
+    return result, data
+
+
+# ── Auth ────────────────────────────────────────────────────────────
+
+
+@smoke
+class TestAuth:
+    def test_status(self):
+        result = _invoke("status")
+        assert result.exit_code == 0
+
+    def test_status_json(self):
+        result, data = _invoke_json("status")
+        assert result.exit_code == 0
+        if data:
+            assert "authenticated" in data
+
+
+# ── Browse (public, no auth needed) ─────────────────────────────────
+
+
+@smoke
+class TestPopular:
+    def test_popular(self):
+        result = _invoke("popular", "-n", "3")
+        assert result.exit_code == 0
+
+    def test_popular_json(self):
+        result, data = _invoke_json("popular", "-n", "3")
+        assert result.exit_code == 0
+        if data:
+            assert "data" in data
+
+    def test_popular_yaml(self):
+        result = runner.invoke(cli, ["popular", "-n", "3", "--yaml"])
+        assert result.exit_code == 0
+
+
+@smoke
+class TestSubreddit:
+    def test_sub_hot(self):
+        result = _invoke("sub", "python", "-n", "5")
+        assert result.exit_code == 0
+
+    def test_sub_new(self):
+        result = _invoke("sub", "python", "-s", "new", "-n", "3")
+        assert result.exit_code == 0
+
+    def test_sub_top_week(self):
+        result = _invoke("sub", "python", "-s", "top", "-t", "week", "-n", "3")
+        assert result.exit_code == 0
+
+    def test_sub_json(self):
+        result, data = _invoke_json("sub", "python", "-n", "3")
+        assert result.exit_code == 0
+        if data:
+            assert "data" in data
+
+    def test_sub_nonexistent(self):
+        result = _invoke("sub", "thissubredditshouldnotexist12345xyz")
+        assert result.exit_code == 0  # Should handle gracefully
+
+
+@smoke
+class TestSubInfo:
+    def test_sub_info(self):
+        result = _invoke("sub-info", "python")
+        assert result.exit_code == 0
+
+    def test_sub_info_json(self):
+        result, data = _invoke_json("sub-info", "python")
+        assert result.exit_code == 0
+        if data:
+            assert "display_name" in data or "subscribers" in data
+
+
+@smoke
+class TestUser:
+    def test_user_profile(self):
+        result = _invoke("user", "spez")
+        assert result.exit_code == 0
+
+    def test_user_profile_json(self):
+        result, data = _invoke_json("user", "spez")
+        assert result.exit_code == 0
+        if data:
+            assert "name" in data
+
+    def test_user_nonexistent(self):
+        result = _invoke("user", "thisusershouldnotexist12345xyz")
+        assert result.exit_code == 0  # Should handle gracefully
+
+
+@smoke
+class TestUserPosts:
+    def test_user_posts(self):
+        result = _invoke("user-posts", "spez", "-n", "3")
+        assert result.exit_code == 0
+
+    def test_user_posts_json(self):
+        result, data = _invoke_json("user-posts", "spez", "-n", "3")
+        assert result.exit_code == 0
+
+
+# ── Search ──────────────────────────────────────────────────────────
+
+
+@smoke
+class TestSearch:
+    def test_search_basic(self):
+        result = _invoke("search", "python", "-n", "5")
+        assert result.exit_code == 0
+
+    def test_search_subreddit(self):
+        result = _invoke("search", "async", "-r", "python", "-n", "3")
+        assert result.exit_code == 0
+
+    def test_search_sort_top(self):
+        result = _invoke("search", "rust", "-s", "top", "-t", "year", "-n", "3")
+        assert result.exit_code == 0
+
+    def test_search_json(self):
+        result, data = _invoke_json("search", "python tips", "-n", "3")
+        assert result.exit_code == 0
+        if data:
+            assert "data" in data
+
+
+# ── Post reading ────────────────────────────────────────────────────
+
+
+@smoke
+class TestRead:
+    def test_read_invalid_id(self):
+        result = _invoke("read", "invalid_post_id_that_does_not_exist")
+        assert result.exit_code == 0  # Should handle error gracefully
+
+
+@smoke
+class TestShow:
+    def test_show_no_cache(self):
+        # Without prior search, show should say no cache
+        result = _invoke("show", "1")
+        assert result.exit_code == 0
+
+
+# ── Export ──────────────────────────────────────────────────────────
+
+
+@smoke
+class TestExport:
+    def test_export_csv_stdout(self):
+        result = _invoke("export", "python", "-n", "3", "--format", "csv")
+        assert result.exit_code == 0
+        if result.output.strip():
+            assert "title" in result.output.lower() or "subreddit" in result.output.lower()
+
+    def test_export_json_stdout(self):
+        result = _invoke("export", "python", "-n", "3", "--format", "json")
+        assert result.exit_code == 0
+
+    def test_export_csv_file(self, tmp_path):
+        outfile = str(tmp_path / "test.csv")
+        result = runner.invoke(cli, ["export", "python", "-n", "3", "-o", outfile])
+        assert result.exit_code == 0
+
+
+# ── Roundtrip workflows ────────────────────────────────────────────
+
+
+@smoke
+class TestRoundtrip:
+    def test_search_then_show(self):
+        """E2E: search → show #1."""
+        r1 = _invoke("search", "python", "-n", "3")
+        assert r1.exit_code == 0
+
+        r2 = _invoke("show", "1")
+        assert r2.exit_code == 0
+
+    def test_browse_then_show(self):
+        """E2E: sub → show #1."""
+        r1 = _invoke("sub", "python", "-n", "3")
+        assert r1.exit_code == 0
+
+        r2 = _invoke("show", "1")
+        assert r2.exit_code == 0
+
+    def test_multi_command(self):
+        """Multiple commands in sequence."""
+        for cmd in [
+            ["status"],
+            ["popular", "-n", "3"],
+            ["sub-info", "python"],
+        ]:
+            result = _invoke(*cmd)
+            assert result.exit_code == 0, f"{cmd} failed: {result.output}"

@@ -1,0 +1,132 @@
+"""Social / interaction commands: upvote, save, subscribe."""
+
+from __future__ import annotations
+
+import click
+
+from ..client import RedditClient
+from ..exceptions import RedditApiError
+from ..index_cache import get_item_by_index
+from ._common import console, require_auth
+
+
+# ── Helpers ─────────────────────────────────────────────────────────
+
+
+def _resolve_fullname(id_or_index: str) -> str | None:
+    """Resolve an ID or short-index to a Reddit fullname (t3_xxx).
+
+    Accepts:
+    - Short index (e.g., "3") → from cache
+    - Bare post ID (e.g., "1abc123") → prepend t3_
+    - Full name (e.g., "t3_1abc123") → as-is
+    """
+    # Try as short-index first
+    try:
+        idx = int(id_or_index)
+        item = get_item_by_index(idx)
+        if item:
+            name = item.get("name", "")
+            if name:
+                return name
+            pid = item.get("id", "")
+            if pid:
+                return f"t3_{pid}"
+        console.print(f"[yellow]Index {idx} not found in cache[/yellow]")
+        return None
+    except ValueError:
+        pass
+
+    # Full name
+    if id_or_index.startswith("t3_") or id_or_index.startswith("t1_"):
+        return id_or_index
+
+    # Bare ID → assume post
+    return f"t3_{id_or_index}"
+
+
+# ── upvote ──────────────────────────────────────────────────────────
+
+
+@click.command()
+@click.argument("id_or_index")
+@click.option("--undo", is_flag=True, help="Remove vote")
+@click.option("--down", is_flag=True, help="Downvote instead")
+def upvote(id_or_index: str, undo: bool, down: bool) -> None:
+    """Upvote a post (by ID or index number)
+
+    Examples:
+      rdt upvote 3           # upvote result #3
+      rdt upvote 1abc123     # upvote by post ID
+      rdt upvote 3 --down    # downvote
+      rdt upvote 3 --undo    # remove vote
+    """
+    cred = require_auth()
+    fullname = _resolve_fullname(id_or_index)
+    if not fullname:
+        return
+
+    direction = 0 if undo else (-1 if down else 1)
+    action_label = "Unvoted" if undo else ("⬇ Downvoted" if down else "⬆ Upvoted")
+
+    try:
+        with RedditClient(cred) as client:
+            client.vote(fullname, direction=direction)
+        console.print(f"[green]✅ {action_label}[/green] {fullname}")
+    except RedditApiError as exc:
+        console.print(f"[red]❌ Vote failed: {exc}[/red]")
+
+
+# ── save / unsave ──────────────────────────────────────────────────
+
+
+@click.command()
+@click.argument("id_or_index")
+@click.option("--undo", is_flag=True, help="Unsave")
+def save(id_or_index: str, undo: bool) -> None:
+    """Save a post (by ID or index number)
+
+    Examples:
+      rdt save 3           # save result #3
+      rdt save 3 --undo    # unsave
+    """
+    cred = require_auth()
+    fullname = _resolve_fullname(id_or_index)
+    if not fullname:
+        return
+
+    try:
+        with RedditClient(cred) as client:
+            if undo:
+                client.unsave_item(fullname)
+                console.print(f"[green]✅ Unsaved[/green] {fullname}")
+            else:
+                client.save_item(fullname)
+                console.print(f"[green]✅ Saved[/green] {fullname}")
+    except RedditApiError as exc:
+        console.print(f"[red]❌ Save failed: {exc}[/red]")
+
+
+# ── subscribe / unsubscribe ────────────────────────────────────────
+
+
+@click.command()
+@click.argument("subreddit")
+@click.option("--undo", is_flag=True, help="Unsubscribe")
+def subscribe(subreddit: str, undo: bool) -> None:
+    """Subscribe to a subreddit
+
+    Examples:
+      rdt subscribe python
+      rdt subscribe python --undo
+    """
+    cred = require_auth()
+    action = "unsub" if undo else "sub"
+    label = "Unsubscribed from" if undo else "Subscribed to"
+
+    try:
+        with RedditClient(cred) as client:
+            client.subscribe(subreddit, action=action)
+        console.print(f"[green]✅ {label}[/green] r/{subreddit}")
+    except RedditApiError as exc:
+        console.print(f"[red]❌ Subscribe failed: {exc}[/red]")
