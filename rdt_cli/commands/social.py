@@ -7,7 +7,7 @@ import click
 from ..client import RedditClient
 from ..exceptions import RedditApiError
 from ..index_cache import get_item_by_index
-from ._common import console, exit_for_error, require_auth
+from ._common import console, exit_for_error, require_auth, write_delay
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -71,6 +71,7 @@ def upvote(id_or_index: str, undo: bool, down: bool) -> None:
     try:
         with RedditClient(cred) as client:
             client.vote(fullname, direction=direction)
+        write_delay()
         console.print(f"[green]✅ {action_label}[/green] {fullname}")
     except RedditApiError as exc:
         exit_for_error(exc, prefix="Vote failed")
@@ -98,9 +99,11 @@ def save(id_or_index: str, undo: bool) -> None:
         with RedditClient(cred) as client:
             if undo:
                 client.unsave_item(fullname)
+                write_delay()
                 console.print(f"[green]✅ Unsaved[/green] {fullname}")
             else:
                 client.save_item(fullname)
+                write_delay()
                 console.print(f"[green]✅ Saved[/green] {fullname}")
     except RedditApiError as exc:
         exit_for_error(exc, prefix="Save failed")
@@ -126,6 +129,7 @@ def subscribe(subreddit: str, undo: bool) -> None:
     try:
         with RedditClient(cred) as client:
             client.subscribe(subreddit, action=action)
+        write_delay()
         console.print(f"[green]✅ {label}[/green] r/{subreddit}")
     except RedditApiError as exc:
         exit_for_error(exc, prefix="Subscribe failed")
@@ -152,6 +156,8 @@ def comment(id_or_index: str, text: str) -> None:
     try:
         with RedditClient(cred) as client:
             client.post_comment(fullname, text)
+        write_delay()
         console.print(f"[green]✅ Comment posted[/green] on {fullname}")
     except RedditApiError as exc:
         exit_for_error(exc, prefix="Comment failed")
+

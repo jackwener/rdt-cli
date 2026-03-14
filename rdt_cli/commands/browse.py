@@ -12,36 +12,51 @@ from ..client import RedditClient
 from ..constants import SORT_OPTIONS, TIME_FILTERS
 from ..index_cache import save_index
 from ._common import (
+    compact_posts,
     console,
     format_score,
     format_time,
     handle_command,
+    listing_options,
+    maybe_print_structured,
     open_url,
     optional_auth,
     require_auth,
+    save_output_to_file,
     structured_output_options,
 )
 
 logger = logging.getLogger(__name__)
 
+# Default title truncation length
+_TITLE_MAX = 50
+_FULL_TITLE_MAX = 200
+
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
-def _render_post_table(posts: list[dict], title: str, show_subreddit: bool = True) -> None:
+def _render_post_table(
+    posts: list[dict], title: str,
+    show_subreddit: bool = True, full_text: bool = False,
+) -> None:
     """Render a list of posts as a Rich table."""
     if not posts:
         console.print("[yellow]No posts found[/yellow]")
         return
 
     save_index(posts, source=title[:40])
+    max_title = _FULL_TITLE_MAX if full_text else _TITLE_MAX
 
     table = Table(title=title, show_lines=True)
     table.add_column("#", style="dim", width=3)
     table.add_column("Score", style="yellow", width=6, justify="right")
     if show_subreddit:
         table.add_column("Subreddit", style="magenta", max_width=15)
-    table.add_column("Title", style="bold cyan", max_width=50)
+    table.add_column(
+        "Title", style="bold cyan",
+        max_width=max_title if not full_text else None,
+    )
     table.add_column("Author", style="green", max_width=14)
     table.add_column("💬", style="dim", width=5, justify="right")
     table.add_column("Time", style="dim", max_width=10)
@@ -55,6 +70,9 @@ def _render_post_table(posts: list[dict], title: str, show_subreddit: bool = Tru
         if post.get("is_video"):
             title_text = f"🎬 {title_text}"
 
+        if not full_text:
+            title_text = title_text[:max_title]
+
         row = [
             str(i),
             format_score(post.get("score", 0)),
@@ -62,7 +80,7 @@ def _render_post_table(posts: list[dict], title: str, show_subreddit: bool = Tru
         if show_subreddit:
             row.append(f"r/{post.get('subreddit', '?')}")
         row.extend([
-            title_text[:50],
+            title_text,
             post.get("author", "-")[:14],
             str(post.get("num_comments", 0)),
             format_time(post.get("created_utc", 0)),
@@ -73,13 +91,61 @@ def _render_post_table(posts: list[dict], title: str, show_subreddit: bool = Tru
     console.print("\n  [dim]💡 Use [bold]rdt show <#>[/bold] to read a post[/dim]")
 
 
-def _listing_render(data: dict, title: str, show_subreddit: bool = True, next_cmd: str = "") -> None:
+def _listing_render(
+    data: dict, title: str,
+    show_subreddit: bool = True, next_cmd: str = "",
+    full_text: bool = False,
+) -> None:
     """Common render for listing endpoints."""
     posts = RedditClient._extract_posts(data)
-    _render_post_table(posts, title, show_subreddit=show_subreddit)
+    _render_post_table(posts, title, show_subreddit=show_subreddit, full_text=full_text)
     cursor = RedditClient._extract_after(data)
     if cursor and next_cmd:
         console.print(f"  [dim]▸ More: {next_cmd} --after {cursor}[/dim]")
+
+
+def _handle_listing(
+    cred, *, action, data_title: str, next_cmd: str = "",
+    show_subreddit: bool = True,
+    as_json: bool, as_yaml: bool,
+    output_file: str | None = None,
+    full_text: bool = False,
+    compact: bool = False,
+) -> None:
+    """Unified listing handler with --output/--full-text/--compact support."""
+    from ..exceptions import RedditApiError
+    from ._common import exit_for_error, run_client_action
+
+    try:
+        data = run_client_action(cred, action)
+
+        # --output: save to file
+        if output_file:
+            out_data = data
+            if compact:
+                posts = RedditClient._extract_posts(data)
+                out_data = compact_posts(posts)
+            save_output_to_file(out_data, output_file)
+            return
+
+        # --compact: strip fields for structured output
+        if compact and (as_json or as_yaml):
+            posts = RedditClient._extract_posts(data)
+            data = compact_posts(posts)
+
+        # --json/--yaml: structured output
+        if maybe_print_structured(data, as_json=as_json, as_yaml=as_yaml):
+            return
+
+        # Rich render
+        _listing_render(
+            data, data_title,
+            show_subreddit=show_subreddit,
+            next_cmd=next_cmd,
+            full_text=full_text,
+        )
+    except RedditApiError as exc:
+        exit_for_error(exc, as_json=as_json, as_yaml=as_yaml)
 
 
 # ── feed ────────────────────────────────────────────────────────────
@@ -88,16 +154,21 @@ def _listing_render(data: dict, title: str, show_subreddit: bool = True, next_cm
 @click.command()
 @click.option("-n", "--limit", default=25, type=int, help="Number of posts (default: 25)")
 @click.option("--after", default=None, help="Pagination cursor")
-@structured_output_options
-def feed(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
+@listing_options
+def feed(
+    limit: int, after: str | None,
+    as_json: bool, as_yaml: bool,
+    output_file: str | None, full_text: bool, compact: bool,
+) -> None:
     """Browse your home feed (requires login)"""
     cred = require_auth()
-    handle_command(
+    _handle_listing(
         cred,
         action=lambda c: c.get_home(limit=limit, after=after),
-        render=lambda d: _listing_render(d, "🏠 Home Feed", next_cmd="rdt feed"),
-        as_json=as_json,
-        as_yaml=as_yaml,
+        data_title="🏠 Home Feed",
+        next_cmd="rdt feed",
+        as_json=as_json, as_yaml=as_yaml,
+        output_file=output_file, full_text=full_text, compact=compact,
     )
 
 
@@ -107,16 +178,21 @@ def feed(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
 @click.command()
 @click.option("-n", "--limit", default=25, type=int, help="Number of posts")
 @click.option("--after", default=None, help="Pagination cursor")
-@structured_output_options
-def popular(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
+@listing_options
+def popular(
+    limit: int, after: str | None,
+    as_json: bool, as_yaml: bool,
+    output_file: str | None, full_text: bool, compact: bool,
+) -> None:
     """Browse /r/popular"""
     cred = optional_auth()
-    handle_command(
+    _handle_listing(
         cred,
         action=lambda c: c.get_popular(limit=limit, after=after),
-        render=lambda d: _listing_render(d, "🔥 Popular", next_cmd="rdt popular"),
-        as_json=as_json,
-        as_yaml=as_yaml,
+        data_title="🔥 Popular",
+        next_cmd="rdt popular",
+        as_json=as_json, as_yaml=as_yaml,
+        output_file=output_file, full_text=full_text, compact=compact,
     )
 
 
@@ -126,16 +202,21 @@ def popular(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None
 @click.command(name="all")
 @click.option("-n", "--limit", default=25, type=int, help="Number of posts")
 @click.option("--after", default=None, help="Pagination cursor")
-@structured_output_options
-def all_cmd(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
+@listing_options
+def all_cmd(
+    limit: int, after: str | None,
+    as_json: bool, as_yaml: bool,
+    output_file: str | None, full_text: bool, compact: bool,
+) -> None:
     """Browse /r/all"""
     cred = optional_auth()
-    handle_command(
+    _handle_listing(
         cred,
         action=lambda c: c.get_all(limit=limit, after=after),
-        render=lambda d: _listing_render(d, "🌍 r/all", next_cmd="rdt all"),
-        as_json=as_json,
-        as_yaml=as_yaml,
+        data_title="🌍 r/all",
+        next_cmd="rdt all",
+        as_json=as_json, as_yaml=as_yaml,
+        output_file=output_file, full_text=full_text, compact=compact,
     )
 
 
@@ -152,25 +233,25 @@ def all_cmd(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None
 )
 @click.option("-n", "--limit", default=25, type=int, help="Number of posts")
 @click.option("--after", default=None, help="Pagination cursor")
-@structured_output_options
+@listing_options
 def sub(
     subreddit: str, sort: str, time_filter: str | None, limit: int,
     after: str | None, as_json: bool, as_yaml: bool,
+    output_file: str | None, full_text: bool, compact: bool,
 ) -> None:
     """Browse a subreddit (e.g., rdt sub python)"""
     cred = optional_auth()
     emoji = {"hot": "🔥", "new": "🆕", "top": "🏆", "rising": "📈"}.get(sort, "📋")
-    handle_command(
+    _handle_listing(
         cred,
-        action=lambda c: c.get_subreddit(subreddit, sort=sort, limit=limit, after=after, time_filter=time_filter),
-        render=lambda d: _listing_render(
-            d,
-            f"{emoji} r/{subreddit} ({sort})",
-            show_subreddit=False,
-            next_cmd=f"rdt sub {subreddit} -s {sort}",
+        action=lambda c: c.get_subreddit(
+            subreddit, sort=sort, limit=limit, after=after, time_filter=time_filter,
         ),
-        as_json=as_json,
-        as_yaml=as_yaml,
+        data_title=f"{emoji} r/{subreddit} ({sort})",
+        show_subreddit=False,
+        next_cmd=f"rdt sub {subreddit} -s {sort}",
+        as_json=as_json, as_yaml=as_yaml,
+        output_file=output_file, full_text=full_text, compact=compact,
     )
 
 
@@ -236,7 +317,10 @@ def user(username: str, as_json: bool, as_yaml: bool) -> None:
         panel = Panel(text, title=f"👤 u/{name}", border_style="green")
         console.print(panel)
 
-    handle_command(cred, action=lambda c: c.get_user_about(username), render=_render, as_json=as_json, as_yaml=as_yaml)
+    handle_command(
+        cred, action=lambda c: c.get_user_about(username),
+        render=_render, as_json=as_json, as_yaml=as_yaml,
+    )
 
 
 # ── user-posts ──────────────────────────────────────────────────────
@@ -246,16 +330,20 @@ def user(username: str, as_json: bool, as_yaml: bool) -> None:
 @click.argument("username")
 @click.option("-n", "--limit", default=25, type=int, help="Number of posts")
 @click.option("--after", default=None, help="Pagination cursor")
-@structured_output_options
-def user_posts(username: str, limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
+@listing_options
+def user_posts(
+    username: str, limit: int, after: str | None,
+    as_json: bool, as_yaml: bool,
+    output_file: str | None, full_text: bool, compact: bool,
+) -> None:
     """View a user's submitted posts"""
     cred = optional_auth()
-    handle_command(
+    _handle_listing(
         cred,
         action=lambda c: c.get_user_posts(username, limit=limit, after=after),
-        render=lambda d: _listing_render(d, f"📝 u/{username}'s posts"),
-        as_json=as_json,
-        as_yaml=as_yaml,
+        data_title=f"📝 u/{username}'s posts",
+        as_json=as_json, as_yaml=as_yaml,
+        output_file=output_file, full_text=full_text, compact=compact,
     )
 
 

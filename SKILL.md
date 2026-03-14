@@ -2,7 +2,7 @@
 name: rdt-cli
 description: Use rdt-cli for ALL Reddit operations — browsing feeds, reading posts, searching, viewing users, upvoting, saving, and subscribing. Invoke whenever the user requests any Reddit interaction.
 author: jackwener
-version: "0.1.0"
+version: "0.2.0"
 tags:
   - reddit
   - rdt
@@ -33,7 +33,7 @@ uv tool upgrade rdt-cli
 ### Step 0: Check if already authenticated
 
 ```bash
-rdt status --json 2>/dev/null && echo "AUTH_OK" || echo "AUTH_NEEDED"
+rdt status --json 2>/dev/null | jq -r '.data.authenticated' | grep -q true && echo "AUTH_OK" || echo "AUTH_NEEDED"
 ```
 
 If `AUTH_OK`, skip to [Command Reference](#command-reference).
@@ -41,7 +41,7 @@ If `AUTH_NEEDED`, proceed to Step 1.
 
 ### Step 1: Guide user to authenticate
 
-Ensure user is logged into reddit.com in a supported browser (Chrome, Firefox, Edge, Brave). Then:
+Ensure user is logged into reddit.com in a supported browser (Chrome, Firefox, Edge, Brave, Arc, Chromium, Opera, Vivaldi, Safari, LibreWolf). Then:
 
 ```bash
 rdt login
@@ -51,6 +51,7 @@ Verify with:
 
 ```bash
 rdt status
+rdt whoami --json | jq '.data.name'
 ```
 
 ### Step 2: Handle common auth issues
@@ -63,10 +64,16 @@ rdt status
 
 ## Agent Defaults
 
+All machine-readable output uses the envelope documented in [SCHEMA.md](./SCHEMA.md).
+Payloads live under `.data`.
+
 - Non-TTY stdout → auto YAML
 - `--json` / `--yaml` → explicit format
+- `--compact` → fewer fields (agent token-efficient)
+- `--output file.json` → save structured output to file
+- Rich output → **stderr** (safe for pipes: `rdt search X --json | jq .data`)
 - Most read commands work without auth (public Reddit JSON API)
-- Write actions (upvote, save, subscribe) require auth
+- Write actions (upvote, save, subscribe) require auth + built-in 1.5-4s delay
 
 ## Command Reference
 
@@ -74,26 +81,30 @@ rdt status
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `rdt feed` | Browse home feed (requires login) | `rdt feed -n 10` |
+| `rdt feed` | Browse home feed (requires login) | `rdt feed -n 10 --json` |
 | `rdt popular` | Browse /r/popular | `rdt popular -n 5 --json` |
+| `rdt all` | Browse /r/all | `rdt all -n 10 --compact --json` |
 | `rdt sub <name>` | Browse a subreddit | `rdt sub python -s top -t week` |
 | `rdt sub-info <name>` | View subreddit info | `rdt sub-info rust --json` |
-| `rdt user <name>` | View user profile | `rdt user spez` |
-| `rdt user-posts <name>` | View user's posts | `rdt user-posts spez -n 5` |
+| `rdt user <name>` | View user profile | `rdt user spez --json` |
+| `rdt user-posts <name>` | View user's posts | `rdt user-posts spez -n 5 --json` |
+| `rdt open <id_or_index>` | Open post in browser | `rdt open 3` |
 
 ### Reading
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `rdt read <post_id>` | Read a post + comments | `rdt read 1abc123` |
-| `rdt show <index>` | Read by short-index | `rdt show 3` |
+| `rdt read <post_id>` | Read a post + comments | `rdt read 1abc123 --json` |
+| `rdt show <index>` | Read by short-index | `rdt show 3 --full-text` |
+| `rdt whoami` | View your profile (karma, age) | `rdt whoami --json` |
 
 ### Search & Export
 
 | Command | Description | Example |
 |---------|-------------|---------|
 | `rdt search <query>` | Search posts | `rdt search "python async" -s top -t year` |
-| `rdt search <query> -r <sub>` | Search in subreddit | `rdt search "error" -r rust` |
+| `rdt search <query> -r <sub>` | Search in subreddit | `rdt search "error" -r rust --json` |
+| `rdt search <query> -o f.json` | Search + save to file | `rdt search "ML" -n 50 -o results.json` |
 | `rdt export <query>` | Export to CSV/JSON | `rdt export "ML" -n 50 -o results.csv` |
 
 ### Interactions (require auth)
@@ -107,6 +118,7 @@ rdt status
 | `rdt save <id> --undo` | Unsave | `rdt save 3 --undo` |
 | `rdt subscribe <sub>` | Subscribe | `rdt subscribe python` |
 | `rdt subscribe <sub> --undo` | Unsubscribe | `rdt subscribe python --undo` |
+| `rdt comment <id> <text>` | Post a comment | `rdt comment 3 "Great post!"` |
 
 ### Account
 
@@ -115,6 +127,19 @@ rdt status
 | `rdt login` | Extract cookies from browser |
 | `rdt logout` | Clear cached cookies |
 | `rdt status` | Check authentication status |
+| `rdt whoami` | View detailed profile info |
+
+## Listing Options
+
+All listing commands (feed, popular, all, sub, user-posts, search) support:
+
+| Flag | Description |
+|------|-------------|
+| `--json` | JSON output (with SCHEMA envelope) |
+| `--yaml` | YAML output (with SCHEMA envelope) |
+| `-o, --output FILE` | Save structured output to file |
+| `--full-text` | Show full title without truncation |
+| `-c, --compact` | Agent-friendly compact output (fewer fields) |
 
 ## Agent Workflow Examples
 
@@ -126,25 +151,32 @@ rdt show 1
 rdt upvote 1
 ```
 
-### Search → Export pipeline
+### Search → Export pipeline (structured)
 
 ```bash
-rdt search "machine learning" -s top -t year --json | jq '.data.children[:3]'
+rdt search "machine learning" -s top --compact --json | jq '.data'
 rdt export "machine learning" -n 100 -o ml_posts.csv
+```
+
+### Search → Save to file
+
+```bash
+rdt search "rust async" -n 50 -o results.json
+rdt search "python tips" -n 20 --compact -o tips.json
 ```
 
 ### User research
 
 ```bash
-rdt user spez --json | jq '{name, link_karma, comment_karma}'
-rdt user-posts spez -n 10 --json
+rdt user spez --json | jq '.data | {name, link_karma, comment_karma}'
+rdt user-posts spez -n 10 --compact --json
 ```
 
 ### Subreddit discovery
 
 ```bash
-rdt sub-info python --json | jq '{subscribers, accounts_active}'
-rdt sub python -s top -t month -n 5
+rdt sub-info python --json | jq '.data | {subscribers, accounts_active}'
+rdt sub python -s top -t month -n 5 --full-text
 ```
 
 ## Sort Options
@@ -153,6 +185,17 @@ rdt sub python -s top -t month -n 5
 - **Search sort**: `relevance`, `hot`, `top`, `new`, `comments`
 - **Time filter** (for top/controversial): `hour`, `day`, `week`, `month`, `year`, `all`
 - **Comment sort**: `best`, `top`, `new`, `controversial`, `old`, `qa`
+
+## Error Codes
+
+Structured error codes returned in the `error.code` field (see [SCHEMA.md](./SCHEMA.md)):
+
+- `not_authenticated` — cookies expired or missing
+- `rate_limited` — too many requests
+- `not_found` — subreddit/user/post does not exist
+- `forbidden` — private subreddit or blocked user
+- `api_error` — upstream Reddit API error
+- `unknown_error` — unexpected error
 
 ## Limitations
 
@@ -166,6 +209,7 @@ rdt sub python -s top -t month -n 5
 ## Anti-Detection Notes for Agents
 
 - **Do NOT parallelize requests** — the built-in rate-limit delay is for account safety
+- **Write operation delay**: 1.5-4s random delay after each write (upvote/save/subscribe/comment)
 - **Batch operations**: add delays between CLI calls when doing bulk work
 - **Chrome 133 fingerprint**: all requests use consistent browser identity
 - **Exponential backoff**: 429/5xx errors are auto-retried with backoff

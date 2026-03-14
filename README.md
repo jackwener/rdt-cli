@@ -24,14 +24,15 @@ A CLI for Reddit — browse feeds, read posts, search, and interact via reverse-
 - 📰 **Posts** — read posts and comment trees with syntax highlighting
 - 🔢 **Short-index navigation** — `rdt show 3` to read, `rdt open 3` to browser
 - 🔍 **Search** — full-text search with subreddit, sort, and time filters
-- 📤 **Export** — export search results to CSV or JSON
+- 📤 **Export** — export search results to CSV or JSON; `-o file.json` on any listing
 - 👤 **Users** — view user profiles and post history
-- ⬆️ **Interactions** — upvote/downvote, save/unsave, subscribe/unsubscribe, comment
+- ⬆️ **Interactions** — upvote/downvote, save/unsave, subscribe/unsubscribe, comment (with 1.5-4s rate-limit delay)
 - 🛡️ **Anti-detection** — consistent Chrome 133 fingerprint, `sec-ch-ua` alignment, Gaussian jitter, exponential backoff
-- 📊 **Structured output** — commands support `--yaml` and `--json`; non-TTY stdout defaults to YAML
+- 📊 **Structured output** — `--yaml`, `--json`, `--output FILE`, `--compact`, `--full-text`
 - 📦 **Stable envelope** — see [SCHEMA.md](./SCHEMA.md) for `ok/schema_version/data/error`
+- 🤖 **Agent-friendly** — Rich output on stderr, `--compact` for token-efficient output
 
-> **AI Agent Tip:** Prefer `--yaml` for structured output unless strict JSON is required. Non-TTY stdout defaults to YAML automatically.
+> **AI Agent Tip:** Prefer `--yaml` for structured output unless strict JSON is required. Non-TTY stdout defaults to YAML automatically. Use `--compact` to reduce token usage.
 
 ## Installation
 
@@ -71,6 +72,7 @@ rdt logout                            # Clear saved cookies
 # ─── Browse ───────────────────────────────────────
 rdt feed                              # Home feed (requires login)
 rdt popular                           # Popular posts
+rdt popular --full-text               # Show full titles
 rdt all                               # /r/all
 rdt sub python                        # Browse subreddit
 rdt sub programming -s top -t week    # Sort + time filter
@@ -94,6 +96,8 @@ rdt open 3                            # Open in browser
 rdt search "python async"             # Global search
 rdt search "rust vs go" -r programming  # Within subreddit
 rdt search "ML" -s top -t year        # Sort by top, last year
+rdt search "AI" -o results.json       # Save to file
+rdt search "rust" --compact --json    # Compact agent output
 
 # ─── Export ───────────────────────────────────────
 rdt export "python tips" -n 100 -o tips.csv

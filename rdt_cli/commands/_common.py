@@ -278,11 +278,62 @@ def structured_output_options(command: Callable) -> Callable:
     return command
 
 
+def listing_options(command: Callable) -> Callable:
+    """Add --json/--yaml/--output/--full-text/--compact options to listing commands."""
+    command = click.option(
+        "-c", "--compact", is_flag=True,
+        help="Compact output (fewer fields, agent-friendly)",
+    )(command)
+    command = click.option(
+        "--full-text", "full_text", is_flag=True,
+        help="Show full title/text without truncation",
+    )(command)
+    command = click.option(
+        "-o", "--output", "output_file", default=None,
+        help="Save structured output to file (JSON/YAML)",
+    )(command)
+    command = click.option("--yaml", "as_yaml", is_flag=True, help="Output as YAML")(command)
+    command = click.option("--json", "as_json", is_flag=True, help="Output as JSON")(command)
+    return command
+
+
 def output_or_render(data: Any, *, as_json: bool, as_yaml: bool, render: Callable) -> None:
     """DRY output routing: JSON / YAML (with envelope) / Rich."""
     if maybe_print_structured(data, as_json=as_json, as_yaml=as_yaml):
         return
     render(data)
+
+
+def save_output_to_file(data: Any, output_file: str) -> None:
+    """Save structured output to a file (auto-detect JSON/YAML by extension)."""
+    payload = success_payload(data)
+    ext = output_file.rsplit(".", 1)[-1].lower() if "." in output_file else "json"
+    if ext in ("yml", "yaml"):
+        try:
+            import yaml
+            text = yaml.dump(payload, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        except ImportError:
+            text = json.dumps(payload, indent=2, ensure_ascii=False)
+    else:
+        text = json.dumps(payload, indent=2, ensure_ascii=False)
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(text)
+    console.print(f"[green]✅ Saved to {output_file}[/green]")
+
+
+def compact_posts(posts: list[dict]) -> list[dict]:
+    """Strip non-essential fields for agent-friendly compact output."""
+    keep = {"id", "name", "title", "subreddit", "author", "score", "num_comments", "permalink", "url", "created_utc"}
+    return [{k: v for k, v in p.items() if k in keep} for p in posts]
+
+
+def write_delay() -> None:
+    """Random delay for write operations (1.5-4s) to mitigate rate limits."""
+    import random
+    import time
+
+    delay = random.uniform(1.5, 4.0)
+    time.sleep(delay)
 
 
 def open_url(url: str) -> None:
@@ -299,3 +350,4 @@ def open_url(url: str) -> None:
             click.echo(url)
     except (FileNotFoundError, subprocess.CalledProcessError):
         click.echo(url)
+
