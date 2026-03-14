@@ -1,0 +1,34 @@
+{
+  "json": {
+    "data": {
+      "things": [
+        {
+          "kind": "t1",
+          "data": {
+            "id": "c3",
+            "name": "t1_c3",
+            "parent_id": "t3_abc123",
+            "author": "dave",
+            "body": "Expanded top level comment",
+            "score": 3,
+            "created_utc": 1710000400,
+            "replies": ""
+          }
+        },
+        {
+          "kind": "t1",
+          "data": {
+            "id": "c4",
+            "name": "t1_c4",
+            "parent_id": "t1_c1",
+            "author": "erin",
+            "body": "Expanded nested reply",
+            "score": 2,
+            "created_utc": 1710000500,
+            "replies": ""
+          }
+        }
+      ]
+    }
+  }
+}

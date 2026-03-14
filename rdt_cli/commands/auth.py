@@ -47,23 +47,51 @@ def logout() -> None:
 def status(as_json: bool, as_yaml: bool) -> None:
     """Check authentication status"""
     from ..auth import CREDENTIAL_FILE, get_credential
+    from ..client import RedditClient
+    from ..session import summarize_session
 
     cred = get_credential()
+    state = summarize_session(RedditClient(cred).session)
     info = {
-        "authenticated": cred is not None,
-        "cookie_count": len(cred.cookies) if cred else 0,
+        "authenticated": state.authenticated,
+        "cookie_count": state.cookie_count,
         "credential_file": str(CREDENTIAL_FILE),
+        "source": state.source,
+        "username": state.username,
+        "capabilities": list(state.capabilities),
+        "modhash_present": state.modhash_present,
+        "last_verified_at": state.last_verified_at,
+        "error": state.error,
     }
+
+    if cred:
+        with RedditClient(cred) as client:
+            result = client.validate_session()
+        state = summarize_session(client.session)
+        info.update(
+            {
+                "authenticated": result["authenticated"],
+                "username": result.get("username") or state.username,
+                "capabilities": result.get("capabilities", list(state.capabilities)),
+                "modhash_present": result.get("modhash_present", state.modhash_present),
+                "last_verified_at": state.last_verified_at,
+                "error": result.get("error"),
+            }
+        )
 
     if maybe_print_structured(info, as_json=as_json, as_yaml=as_yaml):
         return
 
-    if cred:
-        console.print(f"[green]✅ Authenticated[/green] ({len(cred.cookies)} cookies)")
-        if "reddit_session" in cred.cookies:
-            console.print("  [dim]reddit_session: ✓[/dim]")
+    if info["authenticated"]:
+        console.print(f"[green]✅ Authenticated[/green] ({info['cookie_count']} cookies)")
+        if info["username"]:
+            console.print(f"  [dim]user: {info['username']}[/dim]")
+        console.print(f"  [dim]capabilities: {', '.join(info['capabilities']) or '-'}[/dim]")
+        console.print(f"  [dim]source: {info['source']}[/dim]")
     else:
         console.print("[yellow]⚠️  Not authenticated[/yellow]")
+        if info["error"]:
+            console.print(f"  [dim]{info['error']}[/dim]")
         console.print("  [dim]Use 'rdt login' to extract cookies from your browser[/dim]")
 
 
@@ -96,10 +124,17 @@ def whoami(as_json: bool, as_yaml: bool) -> None:
         panel = Panel(text, title="👤 Me", border_style="green")
         console.print(panel)
 
-    handle_command(
-        cred,
-        action=lambda c: c.get_user_about(cred.cookies.get("reddit_user", "me")),
-        render=_render,
-        as_json=as_json,
-        as_yaml=as_yaml,
-    )
+    def _action(client):
+        me = client.get_me()
+        name = me.get("name") or client.session.username
+        if not name:
+            return me
+        profile = client.get_user_about(name)
+        profile.setdefault("name", name)
+        profile["_session"] = {
+            "capabilities": sorted(client.session.capabilities),
+            "modhash_present": bool(client.session.modhash),
+        }
+        return profile
+
+    handle_command(cred, action=_action, render=_render, as_json=as_json, as_yaml=as_yaml)

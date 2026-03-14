@@ -32,7 +32,8 @@ class TestCliBasic:
         result = runner.invoke(cli, ["--help"])
         expected = [
             "login", "logout", "status",
-            "feed", "popular", "all", "sub", "sub-info", "user", "user-posts", "open",
+            "feed", "popular", "all", "sub", "sub-info", "user",
+            "user-posts", "user-comments", "saved", "upvoted", "open",
             "read", "show",
             "search", "export",
             "upvote", "save", "subscribe", "comment",
@@ -45,14 +46,13 @@ class TestCliBasic:
         assert result.exit_code == 0
 
     def test_command_count(self):
-        """Ensure we have exactly 19 commands."""
+        """Ensure we have the expanded command set."""
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0
         # Count command lines (indented, after "Commands:" )
         lines = result.output.split("\n")
         cmd_lines = [line for line in lines if line.startswith("  ") and not line.strip().startswith("-")]
-        # At least 19 commands
-        assert len(cmd_lines) >= 19
+        assert len(cmd_lines) >= 22
 
 
 # ── Command help ────────────────────────────────────────────────────
@@ -65,7 +65,8 @@ class TestCommandHelp:
         "cmd",
         [
             "login", "logout", "status",
-            "feed", "popular", "all", "sub", "sub-info", "user", "user-posts", "open",
+            "feed", "popular", "all", "sub", "sub-info", "user",
+            "user-posts", "user-comments", "saved", "upvoted", "open",
             "read", "show",
             "search", "export",
             "upvote", "save", "subscribe", "comment",
@@ -74,6 +75,11 @@ class TestCommandHelp:
     def test_help(self, cmd):
         result = runner.invoke(cli, [cmd, "--help"])
         assert result.exit_code == 0, f"{cmd} --help failed: {result.output}"
+
+    def test_read_help_has_expand_more(self):
+        result = runner.invoke(cli, ["read", "--help"])
+        assert result.exit_code == 0
+        assert "--expand-more" in result.output
 
 
 # ── Auth commands (mocked) ──────────────────────────────────────────
@@ -99,12 +105,20 @@ class TestAuthCommands:
         from rdt_cli.auth import Credential
         cred = Credential(cookies={"reddit_session": "test", "token": "xyz"})
         with patch("rdt_cli.auth.get_credential", return_value=cred):
-            result = runner.invoke(cli, ["status", "--json"])
-            assert result.exit_code == 0
-            data = json.loads(result.output)
-            assert data["ok"] is True
-            assert data["data"]["authenticated"] is True
-            assert data["data"]["cookie_count"] == 2
+            with patch("rdt_cli.client.RedditClient.validate_session", return_value={
+                "authenticated": True,
+                "username": "spez",
+                "capabilities": ["read", "write"],
+                "modhash_present": True,
+            }):
+                result = runner.invoke(cli, ["status", "--json"])
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                assert data["ok"] is True
+                assert data["data"]["authenticated"] is True
+                assert data["data"]["cookie_count"] == 2
+                assert data["data"]["username"] == "spez"
+                assert data["data"]["capabilities"] == ["read", "write"]
 
     def test_login_already_authenticated(self):
         from rdt_cli.auth import Credential
@@ -223,12 +237,14 @@ class TestCredential:
         monkeypatch.setattr(auth, "CREDENTIAL_FILE", tmp_path / "cred.json")
 
         from rdt_cli.auth import Credential
-        cred = Credential(cookies={"reddit_session": "test_val"})
+        cred = Credential(cookies={"reddit_session": "test_val"}, source="browser:chrome", username="spez")
         auth.save_credential(cred)
 
         loaded = auth.load_credential()
         assert loaded is not None
         assert loaded.cookies["reddit_session"] == "test_val"
+        assert loaded.source == "browser:chrome"
+        assert loaded.username == "spez"
 
     def test_load_no_file(self, tmp_path, monkeypatch):
         from rdt_cli import auth
@@ -646,6 +662,32 @@ class TestMockedBrowse:
                 result = runner.invoke(cli, ["user", "testuser", "--json"])
                 assert result.exit_code == 0
 
+    def test_user_comments_mocked(self):
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_user_comments", return_value=self._mock_listing()):
+                result = runner.invoke(cli, ["user-comments", "testuser", "--json"])
+                assert result.exit_code == 0
+
+    def test_saved_mocked(self):
+        from rdt_cli.auth import Credential
+
+        cred = Credential(cookies={"reddit_session": "test"}, username="spez")
+        with patch("rdt_cli.auth.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.get_me", return_value={"name": "spez"}):
+                with patch("rdt_cli.client.RedditClient.get_user_saved", return_value=self._mock_listing()):
+                    result = runner.invoke(cli, ["saved", "--json"])
+                    assert result.exit_code == 0
+
+    def test_upvoted_mocked(self):
+        from rdt_cli.auth import Credential
+
+        cred = Credential(cookies={"reddit_session": "test"}, username="spez")
+        with patch("rdt_cli.auth.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.get_me", return_value={"name": "spez"}):
+                with patch("rdt_cli.client.RedditClient.get_user_upvoted", return_value=self._mock_listing()):
+                    result = runner.invoke(cli, ["upvoted", "--json"])
+                    assert result.exit_code == 0
+
 
 # ── Mocked search commands ──────────────────────────────────────────
 
@@ -671,3 +713,21 @@ class TestMockedSearch:
             with patch("rdt_cli.client.RedditClient.search", return_value=empty):
                 result = runner.invoke(cli, ["search", "xxxnonexistent", "--json"])
                 assert result.exit_code == 0
+
+
+class TestMoreComments:
+    def test_read_expand_more_json(self):
+        from pathlib import Path
+
+        post_detail = json.loads((Path(__file__).parent / "fixtures" / "post_detail.json").read_text())
+        morechildren = json.loads((Path(__file__).parent / "fixtures" / "morechildren.json").read_text())
+
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_post_comments", return_value=post_detail):
+                with patch("rdt_cli.client.RedditClient.get_more_comments", return_value=morechildren):
+                    result = runner.invoke(cli, ["read", "abc123", "--expand-more", "--json"])
+                    assert result.exit_code == 0
+                    data = json.loads(result.output)
+                    assert data["ok"] is True
+                    assert data["data"]["post"]["id"] == "abc123"
+                    assert any(comment["id"] == "c3" for comment in data["data"]["comments"])

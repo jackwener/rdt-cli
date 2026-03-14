@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 import logging
-import random
-import time
 from typing import Any
 
-import httpx
-
+from .config import DEFAULT_CONFIG, RuntimeConfig
 from .constants import (
     ALL_URL,
-    BASE_URL,
     COMMENT_URL,
     DEFAULT_LIMIT,
-    HEADERS,
     HOME_URL,
+    MORECHILDREN_URL,
     POPULAR_URL,
     POST_COMMENTS_SHORT_URL,
     POST_COMMENTS_URL,
@@ -28,14 +24,16 @@ from .constants import (
     USER_ABOUT_URL,
     USER_COMMENTS_URL,
     USER_POSTS_URL,
+    USER_SAVED_URL,
+    USER_UPVOTED_URL,
     VOTE_URL,
 )
 from .exceptions import (
-    ForbiddenError,
-    NotFoundError,
     RedditApiError,
-    SessionExpiredError,
 )
+from .fingerprint import BrowserFingerprint
+from .session import SessionState
+from .transports import ReadTransport, WriteTransport
 
 logger = logging.getLogger(__name__)
 
@@ -62,125 +60,69 @@ class RedditClient:
         self._timeout = timeout
         self._request_delay = request_delay
         self._max_retries = max_retries
-        self._last_request_time = 0.0
-        self._request_count = 0
-        self._http: httpx.Client | None = None
-
-    def _build_client(self) -> httpx.Client:
-        cookies = {}
-        if self.credential:
-            cookies = self.credential.cookies
-        return httpx.Client(
-            base_url=BASE_URL,
-            headers=dict(HEADERS),
-            cookies=cookies,
-            follow_redirects=True,
-            timeout=httpx.Timeout(self._timeout),
+        self._config = RuntimeConfig(
+            timeout=timeout,
+            read_request_delay=request_delay,
+            write_request_delay=max(request_delay, DEFAULT_CONFIG.write_request_delay),
+            max_retries=max_retries,
+            status_check_timeout=min(timeout, DEFAULT_CONFIG.status_check_timeout),
         )
+        self._fingerprint = BrowserFingerprint.chrome133_mac()
+        self.session = SessionState.from_credential(credential)
+        self._read_transport: ReadTransport | None = None
+        self._write_transport: WriteTransport | None = None
+        self._http = None
 
     @property
-    def client(self) -> httpx.Client:
-        if not self._http:
+    def client(self):
+        if not self._read_transport:
             raise RuntimeError("Client not initialized. Use 'with RedditClient() as client:'")
-        return self._http
+        return self._read_transport.client
 
     def __enter__(self) -> RedditClient:
-        self._http = self._build_client()
+        self._read_transport = ReadTransport(
+            self.session,
+            config=self._config,
+            fingerprint=self._fingerprint,
+            request_delay=self._config.read_request_delay,
+        )
+        self._write_transport = WriteTransport(
+            self.session,
+            config=self._config,
+            fingerprint=self._fingerprint,
+            request_delay=self._config.write_request_delay,
+        )
+        self._http = self._read_transport.client
         return self
 
     def __exit__(self, *args: Any) -> None:
-        if self._http:
-            self._http.close()
-            self._http = None
+        if self._read_transport:
+            self._read_transport.close()
+            self._read_transport = None
+        if self._write_transport:
+            self._write_transport.close()
+            self._write_transport = None
+        self._http = None
 
     @property
     def request_stats(self) -> dict[str, int]:
-        return {"request_count": self._request_count}
-
-    # ── Rate limiting ───────────────────────────────────────────────
-
-    def _rate_limit_delay(self) -> None:
-        """Enforce minimum delay with Gaussian jitter to mimic human browsing."""
-        if self._request_delay <= 0:
-            return
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self._request_delay:
-            jitter = max(0, random.gauss(0.3, 0.15))
-            if random.random() < 0.05:
-                jitter += random.uniform(2.0, 5.0)
-            time.sleep(self._request_delay - elapsed + jitter)
-
-    # ── Response cookies ────────────────────────────────────────────
-
-    def _merge_response_cookies(self, resp: httpx.Response) -> None:
-        """Merge Set-Cookie headers back into session jar."""
-        for name, value in resp.cookies.items():
-            if value:
-                self.client.cookies.set(name, value)
+        read_count = self._read_transport.request_count if self._read_transport else 0
+        write_count = self._write_transport.request_count if self._write_transport else 0
+        return {"request_count": read_count + write_count}
 
     # ── Core request ────────────────────────────────────────────────
 
     def _request(self, method: str, url: str, **kwargs: Any) -> Any:
-        """Rate-limited request with retry and cookie merge."""
-        self._rate_limit_delay()
+        """Read request through the low-risk transport."""
+        if not self._read_transport:
+            raise RuntimeError("Client not initialized. Use 'with RedditClient() as client:'")
+        return self._read_transport.request(method, url, **kwargs)
 
-        last_exc: Exception | None = None
-        for attempt in range(self._max_retries):
-            t0 = time.time()
-            try:
-                resp = self.client.request(method, url, **kwargs)
-                elapsed = time.time() - t0
-                self._merge_response_cookies(resp)
-                self._request_count += 1
-                self._last_request_time = time.time()
-                logger.info(
-                    "[#%d] %s %s → %d (%.2fs)",
-                    self._request_count,
-                    method,
-                    url[:80],
-                    resp.status_code,
-                    elapsed,
-                )
-
-                # Retry on server errors
-                if resp.status_code == 429:
-                    retry_after = float(resp.headers.get("Retry-After", 5))
-                    logger.warning("Rate limited, waiting %.1fs", retry_after)
-                    time.sleep(retry_after)
-                    continue
-
-                if resp.status_code in (500, 502, 503, 504):
-                    wait = (2**attempt) + random.uniform(0, 1)
-                    logger.warning("HTTP %d, retrying in %.1fs", resp.status_code, wait)
-                    time.sleep(wait)
-                    continue
-
-                # Client errors
-                if resp.status_code == 401:
-                    raise SessionExpiredError()
-                if resp.status_code == 403:
-                    raise ForbiddenError()
-                if resp.status_code == 404:
-                    raise NotFoundError()
-
-                resp.raise_for_status()
-
-                # Reddit returns HTML on some error pages
-                text = resp.text
-                if text.strip().startswith("<"):
-                    raise RedditApiError("Received HTML instead of JSON (possible auth redirect)")
-
-                return resp.json()
-
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                last_exc = exc
-                wait = (2**attempt) + random.uniform(0, 1)
-                logger.warning("Network error: %s, retrying in %.1fs", exc, wait)
-                time.sleep(wait)
-
-        if last_exc:
-            raise RedditApiError(f"Request failed after {self._max_retries} retries: {last_exc}") from last_exc
-        raise RedditApiError(f"Request failed after {self._max_retries} retries")
+    def _write_request(self, method: str, url: str, **kwargs: Any) -> Any:
+        """Write request through the authenticated transport."""
+        if not self._write_transport:
+            raise RuntimeError("Client not initialized. Use 'with RedditClient() as client:'")
+        return self._write_transport.request(method, url, **kwargs)
 
     def _get(self, url: str, params: dict[str, Any] | None = None) -> Any:
         """GET request."""
@@ -188,7 +130,7 @@ class RedditClient:
 
     def _post(self, url: str, data: dict[str, Any] | None = None) -> Any:
         """POST request."""
-        return self._request("POST", url, data=data)
+        return self._write_request("POST", url, data=data)
 
     # ── Listing helpers ─────────────────────────────────────────────
 
@@ -273,6 +215,26 @@ class RedditClient:
         params: dict[str, Any] = {"sort": sort, "limit": limit, "raw_json": 1}
         return self._get(url, params=params)
 
+    def get_more_comments(
+        self,
+        post_id: str,
+        children: list[str],
+        *,
+        sort: str = "best",
+    ) -> dict:
+        """Expand additional comments for a post."""
+        if not children:
+            return {"json": {"data": {"things": []}}}
+        params: dict[str, Any] = {
+            "api_type": "json",
+            "link_id": f"t3_{post_id}",
+            "children": ",".join(children),
+            "sort": sort,
+            "limit_children": False,
+            "raw_json": 1,
+        }
+        return self._get(MORECHILDREN_URL, params=params)
+
     # ── Search ──────────────────────────────────────────────────────
 
     def search(
@@ -322,16 +284,49 @@ class RedditClient:
             params["after"] = after
         return self._get(USER_COMMENTS_URL.format(username=username), params=params)
 
+    def get_user_saved(self, username: str, limit: int = DEFAULT_LIMIT, after: str | None = None) -> dict:
+        """Get user's saved items."""
+        params: dict[str, Any] = {"limit": limit, "raw_json": 1}
+        if after:
+            params["after"] = after
+        return self._get(USER_SAVED_URL.format(username=username), params=params)
+
+    def get_user_upvoted(self, username: str, limit: int = DEFAULT_LIMIT, after: str | None = None) -> dict:
+        """Get user's upvoted items."""
+        params: dict[str, Any] = {"limit": limit, "raw_json": 1}
+        if after:
+            params["after"] = after
+        return self._get(USER_UPVOTED_URL.format(username=username), params=params)
+
     # ── Identity (requires auth) ────────────────────────────────────
 
     def get_me(self) -> dict:
-        """Get current user info. Uses oauth.reddit.com."""
-        # For the .json API, we try /api/v1/me or fallback to username based
+        """Get current user info and enrich session capabilities."""
+        data = self._get("/api/me.json", params={"raw_json": 1})
+        if isinstance(data, dict):
+            self.session.apply_identity(data)
+        return data
+
+    def validate_session(self) -> dict[str, Any]:
+        """Probe a lightweight auth endpoint to classify current credential."""
         try:
-            return self._get("/api/me.json", params={"raw_json": 1})
-        except RedditApiError:
-            # Fallback: try to get identity from cookie-based session
-            return {"error": "Identity endpoint requires OAuth token"}
+            identity = self.get_me()
+            return {
+                "authenticated": True,
+                "username": self.session.username,
+                "capabilities": sorted(self.session.capabilities),
+                "modhash_present": bool(self.session.modhash),
+                "identity": identity,
+            }
+        except RedditApiError as exc:
+            self.session.apply_validation_error(str(exc))
+            return {
+                "authenticated": False,
+                "username": self.session.username,
+                "capabilities": sorted(self.session.capabilities),
+                "modhash_present": bool(self.session.modhash),
+                "error": str(exc),
+            }
 
     # ── Write actions (require authentication) ──────────────────────
 

@@ -1,0 +1,48 @@
+{
+  "data": {
+    "after": "t3_after",
+    "before": null,
+    "children": [
+      {
+        "kind": "t3",
+        "data": {
+          "id": "abc123",
+          "name": "t3_abc123",
+          "title": "Async Python Tips",
+          "subreddit": "python",
+          "author": "guido",
+          "score": 1234,
+          "num_comments": 56,
+          "created_utc": 1710000000,
+          "permalink": "/r/python/comments/abc123/async_python_tips/",
+          "url": "https://reddit.com/r/python/comments/abc123/async_python_tips/",
+          "selftext": "A post body",
+          "is_self": true,
+          "over_18": false,
+          "is_video": false,
+          "stickied": true
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "def456",
+          "name": "t3_def456",
+          "title": "Rust vs Go",
+          "subreddit": "programming",
+          "author": "alice",
+          "score": 77,
+          "num_comments": 8,
+          "created_utc": 1710000100,
+          "permalink": "/r/programming/comments/def456/rust_vs_go/",
+          "url": "https://example.com/rust-vs-go",
+          "selftext": "",
+          "is_self": false,
+          "over_18": true,
+          "is_video": true,
+          "stickied": false
+        }
+      }
+    ]
+  }
+}

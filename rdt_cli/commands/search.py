@@ -15,8 +15,8 @@ from ..client import RedditClient
 from ..constants import SEARCH_SORT_OPTIONS, TIME_FILTERS
 from ..exceptions import RedditApiError
 from ..index_cache import save_index
+from ..parser import parse_listing
 from ._common import (
-    compact_posts,
     console,
     exit_for_error,
     format_score,
@@ -30,14 +30,14 @@ logger = logging.getLogger(__name__)
 
 
 def _render_search_table(
-    posts: list[dict], query: str, full_text: bool = False,
+    posts, query: str, full_text: bool = False,
 ) -> None:
     """Render search results as a Rich table."""
     if not posts:
         console.print(f"[yellow]No results for '{query}'[/yellow]")
         return
 
-    save_index(posts, source=f"search:{query}")
+    save_index([post.to_dict() for post in posts], source=f"search:{query}")
     max_title = 200 if full_text else 45
 
     table = Table(title=f'🔍 Search: "{query}" — {len(posts)} results', show_lines=True)
@@ -52,16 +52,16 @@ def _render_search_table(
     table.add_column("💬", style="dim", width=5, justify="right")
 
     for i, post in enumerate(posts, 1):
-        title_text = post.get("title", "-")
+        title_text = post.title or "-"
         if not full_text:
             title_text = title_text[:max_title]
         table.add_row(
             str(i),
-            format_score(post.get("score", 0)),
-            f"r/{post.get('subreddit', '?')}",
+            format_score(post.score),
+            f"r/{post.subreddit or '?'}",
             title_text,
-            post.get("author", "-")[:12],
-            str(post.get("num_comments", 0)),
+            (post.author or "-")[:12],
+            str(post.num_comments),
         )
 
     console.print(table)
@@ -117,24 +117,25 @@ def search(
                 after=after,
             )
 
-        posts = RedditClient._extract_posts(data)
+        listing = parse_listing(data)
+        posts = listing.items
         if posts:
-            save_index(posts, source=f"search:{query}")
+            save_index([post.to_dict() for post in posts], source=f"search:{query}")
 
         # --output: save to file
         if output_file:
-            out_data = compact_posts(posts) if compact else data
+            out_data = [post.to_dict() for post in posts] if compact else data
             save_output_to_file(out_data, output_file)
             return
 
         # --compact: strip fields for structured output
         out_data = data
         if compact and (as_json or as_yaml):
-            out_data = compact_posts(posts)
+            out_data = [post.to_dict() for post in posts]
 
         if maybe_print_structured(out_data, as_json=as_json, as_yaml=as_yaml):
             # Show pagination hint
-            cursor = RedditClient._extract_after(data)
+            cursor = listing.after
             if cursor:
                 console.print(
                     f'  [dim]▸ More: rdt search "{query}" --after {cursor}[/dim]',
@@ -144,7 +145,7 @@ def search(
         _render_search_table(posts, query, full_text=full_text)
 
         # Show pagination hint
-        cursor = RedditClient._extract_after(data)
+        cursor = listing.after
         if cursor and sys.stdout.isatty():
             console.print(f'  [dim]▸ More: rdt search "{query}" --after {cursor}[/dim]')
 

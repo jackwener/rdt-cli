@@ -33,6 +33,11 @@ def _invoke_json(*args):
     return result, data
 
 
+def _authenticated() -> bool:
+    result, data = _invoke_json("status")
+    return bool(result.exit_code == 0 and data and data.get("ok") and data.get("data", {}).get("authenticated"))
+
+
 # ── Auth ────────────────────────────────────────────────────────────
 
 
@@ -167,6 +172,19 @@ class TestUserPosts:
         assert result.exit_code == 0
 
 
+@smoke
+class TestUserComments:
+    def test_user_comments(self):
+        result = _invoke("user-comments", "spez", "-n", "3")
+        assert result.exit_code == 0
+
+    def test_user_comments_json(self):
+        result, data = _invoke_json("user-comments", "spez", "-n", "3")
+        assert result.exit_code == 0
+        if data:
+            assert data["ok"] is True
+
+
 # ── Search ──────────────────────────────────────────────────────────
 
 
@@ -204,6 +222,11 @@ class TestRead:
         result = _invoke("read", "invalid_post_id_that_does_not_exist")
         # May exit 0 or 1 depending on API response
         assert result.exit_code in (0, 1)
+
+    def test_read_expand_more_help(self):
+        result = _invoke("read", "--help")
+        assert result.exit_code == 0
+        assert "--expand-more" in result.output
 
 
 @smoke
@@ -489,6 +512,48 @@ class TestReadPositive:
         if r2_data:
             assert r2_data["ok"] is True
 
+    def test_read_real_post_expand_more_json(self):
+        r1, data = _invoke_json("search", "python tips", "-n", "1")
+        assert r1.exit_code == 0
+        if not data or not data.get("ok"):
+            pytest.skip("Search returned no data")
+
+        from rdt_cli.client import RedditClient
+
+        inner = data.get("data", {})
+        posts = RedditClient._extract_posts(inner)
+        if not posts:
+            pytest.skip("No posts")
+
+        post_id = posts[0].get("id", "")
+        if not post_id:
+            pytest.skip("No ID")
+
+        r2, r2_data = _invoke_json("read", post_id, "--expand-more")
+        assert r2.exit_code == 0
+        if r2_data:
+            assert r2_data["ok"] is True
+            assert "comments" in r2_data["data"]
+
+
+@smoke
+class TestAuthenticatedViews:
+    def test_saved_json(self):
+        if not _authenticated():
+            pytest.skip("Authentication required for saved")
+        result, data = _invoke_json("saved", "-n", "3")
+        assert result.exit_code == 0
+        if data:
+            assert data["ok"] is True
+
+    def test_upvoted_json(self):
+        if not _authenticated():
+            pytest.skip("Authentication required for upvoted")
+        result, data = _invoke_json("upvoted", "-n", "3")
+        assert result.exit_code == 0
+        if data:
+            assert data["ok"] is True
+
 
 # ── Pagination ─────────────────────────────────────────────────────
 
@@ -526,4 +591,3 @@ class TestPagination:
 
         r2 = _invoke("search", "python", "-n", "3", "--after", cursor)
         assert r2.exit_code == 0
-

@@ -27,6 +27,7 @@ SUBREDDIT_ABOUT_URL = "/r/{subreddit}/about.json"
 # Post / comments
 POST_COMMENTS_URL = "/r/{subreddit}/comments/{post_id}.json"
 POST_COMMENTS_SHORT_URL = "/comments/{post_id}.json"
+MORECHILDREN_URL = "/api/morechildren.json"
 
 # Search
 SEARCH_URL = "/search.json"

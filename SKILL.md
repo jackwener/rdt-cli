@@ -51,7 +51,7 @@ Verify with:
 
 ```bash
 rdt status
-rdt whoami --json | jq '.data.name'
+rdt whoami --json | jq '.data.name // .data._session.username'
 ```
 
 ### Step 2: Handle common auth issues
@@ -88,6 +88,9 @@ Payloads live under `.data`.
 | `rdt sub-info <name>` | View subreddit info | `rdt sub-info rust --json` |
 | `rdt user <name>` | View user profile | `rdt user spez --json` |
 | `rdt user-posts <name>` | View user's posts | `rdt user-posts spez -n 5 --json` |
+| `rdt user-comments <name>` | View user's comments | `rdt user-comments spez -n 5 --json` |
+| `rdt saved` | View your saved items | `rdt saved -n 10 --json` |
+| `rdt upvoted` | View your upvoted posts | `rdt upvoted -n 10 --json` |
 | `rdt open <id_or_index>` | Open post in browser | `rdt open 3` |
 
 ### Reading
@@ -95,7 +98,9 @@ Payloads live under `.data`.
 | Command | Description | Example |
 |---------|-------------|---------|
 | `rdt read <post_id>` | Read a post + comments | `rdt read 1abc123 --json` |
-| `rdt show <index>` | Read by short-index | `rdt show 3 --full-text` |
+| `rdt read <post_id> --expand-more` | Expand top-level `more comments` | `rdt read 1abc123 --expand-more --json` |
+| `rdt show <index>` | Read by short-index | `rdt show 3` |
+| `rdt show <index> --expand-more` | Expand `more comments` from cached result | `rdt show 3 --expand-more --json` |
 | `rdt whoami` | View your profile (karma, age) | `rdt whoami --json` |
 
 ### Search & Export
@@ -131,7 +136,7 @@ Payloads live under `.data`.
 
 ## Listing Options
 
-All listing commands (feed, popular, all, sub, user-posts, search) support:
+All listing commands (feed, popular, all, sub, user-posts, user-comments, saved, upvoted, search) support:
 
 | Flag | Description |
 |------|-------------|
@@ -147,7 +152,7 @@ All listing commands (feed, popular, all, sub, user-posts, search) support:
 
 ```bash
 rdt sub python -s top -t week -n 5
-rdt show 1
+rdt show 1 --expand-more
 rdt upvote 1
 ```
 
@@ -170,6 +175,14 @@ rdt search "python tips" -n 20 --compact -o tips.json
 ```bash
 rdt user spez --json | jq '.data | {name, link_karma, comment_karma}'
 rdt user-posts spez -n 10 --compact --json
+rdt user-comments spez -n 10 --compact --json
+```
+
+### Saved / Upvoted review
+
+```bash
+rdt saved -n 20 --compact --json
+rdt upvoted -n 20 --compact --json
 ```
 
 ### Subreddit discovery

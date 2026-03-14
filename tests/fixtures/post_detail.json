@@ -1,0 +1,69 @@
+[
+  {
+    "data": {
+      "children": [
+        {
+          "kind": "t3",
+          "data": {
+            "id": "abc123",
+            "name": "t3_abc123",
+            "title": "Async Python Tips",
+            "subreddit": "python",
+            "author": "guido",
+            "score": 1234,
+            "num_comments": 56,
+            "created_utc": 1710000000,
+            "permalink": "/r/python/comments/abc123/async_python_tips/",
+            "url": "https://reddit.com/r/python/comments/abc123/async_python_tips/",
+            "selftext": "A post body",
+            "is_self": true
+          }
+        }
+      ]
+    }
+  },
+  {
+    "data": {
+      "children": [
+        {
+          "kind": "t1",
+          "data": {
+            "id": "c1",
+            "name": "t1_c1",
+            "author": "bob",
+            "body": "First comment",
+            "score": 10,
+            "created_utc": 1710000200,
+            "replies": {
+              "data": {
+                "children": [
+                  {
+                    "kind": "t1",
+                    "data": {
+                      "id": "c2",
+                      "name": "t1_c2",
+                      "author": "carol",
+                      "body": "Nested reply",
+                      "score": 4,
+                      "created_utc": 1710000300,
+                      "replies": ""
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "more",
+          "data": {
+            "id": "_",
+            "name": "more_1",
+            "parent_id": "t3_abc123",
+            "children": ["c3", "c4", "c5"]
+          }
+        }
+      ]
+    }
+  }
+]

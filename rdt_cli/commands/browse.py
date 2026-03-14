@@ -10,9 +10,10 @@ from rich.table import Table
 
 from ..client import RedditClient
 from ..constants import SORT_OPTIONS, TIME_FILTERS
+from ..exceptions import RedditApiError
 from ..index_cache import save_index
+from ..parser import parse_listing, parse_subreddit_info, parse_user_profile
 from ._common import (
-    compact_posts,
     console,
     format_score,
     format_time,
@@ -37,7 +38,7 @@ _FULL_TITLE_MAX = 200
 
 
 def _render_post_table(
-    posts: list[dict], title: str,
+    posts, title: str,
     show_subreddit: bool = True, full_text: bool = False,
 ) -> None:
     """Render a list of posts as a Rich table."""
@@ -45,7 +46,7 @@ def _render_post_table(
         console.print("[yellow]No posts found[/yellow]")
         return
 
-    save_index(posts, source=title[:40])
+    save_index([post.to_dict() for post in posts], source=title[:40])
     max_title = _FULL_TITLE_MAX if full_text else _TITLE_MAX
 
     table = Table(title=title, show_lines=True)
@@ -62,12 +63,12 @@ def _render_post_table(
     table.add_column("Time", style="dim", max_width=10)
 
     for i, post in enumerate(posts, 1):
-        title_text = post.get("title", "-")
-        if post.get("stickied"):
+        title_text = post.title or "-"
+        if post.stickied:
             title_text = f"📌 {title_text}"
-        if post.get("over_18"):
+        if post.over_18:
             title_text = f"🔞 {title_text}"
-        if post.get("is_video"):
+        if post.is_video:
             title_text = f"🎬 {title_text}"
 
         if not full_text:
@@ -75,15 +76,15 @@ def _render_post_table(
 
         row = [
             str(i),
-            format_score(post.get("score", 0)),
+            format_score(post.score),
         ]
         if show_subreddit:
-            row.append(f"r/{post.get('subreddit', '?')}")
+            row.append(f"r/{post.subreddit or '?'}")
         row.extend([
             title_text,
-            post.get("author", "-")[:14],
-            str(post.get("num_comments", 0)),
-            format_time(post.get("created_utc", 0)),
+            (post.author or "-")[:14],
+            str(post.num_comments),
+            format_time(post.created_utc),
         ])
         table.add_row(*row)
 
@@ -97,9 +98,9 @@ def _listing_render(
     full_text: bool = False,
 ) -> None:
     """Common render for listing endpoints."""
-    posts = RedditClient._extract_posts(data)
-    _render_post_table(posts, title, show_subreddit=show_subreddit, full_text=full_text)
-    cursor = RedditClient._extract_after(data)
+    listing = parse_listing(data)
+    _render_post_table(listing.items, title, show_subreddit=show_subreddit, full_text=full_text)
+    cursor = listing.after
     if cursor and next_cmd:
         console.print(f"  [dim]▸ More: {next_cmd} --after {cursor}[/dim]")
 
@@ -113,7 +114,6 @@ def _handle_listing(
     compact: bool = False,
 ) -> None:
     """Unified listing handler with --output/--full-text/--compact support."""
-    from ..exceptions import RedditApiError
     from ._common import exit_for_error, run_client_action
 
     try:
@@ -123,15 +123,13 @@ def _handle_listing(
         if output_file:
             out_data = data
             if compact:
-                posts = RedditClient._extract_posts(data)
-                out_data = compact_posts(posts)
+                out_data = [post.to_dict() for post in parse_listing(data).items]
             save_output_to_file(out_data, output_file)
             return
 
         # --compact: strip fields for structured output
         if compact and (as_json or as_yaml):
-            posts = RedditClient._extract_posts(data)
-            data = compact_posts(posts)
+            data = [post.to_dict() for post in parse_listing(data).items]
 
         # --json/--yaml: structured output
         if maybe_print_structured(data, as_json=as_json, as_yaml=as_yaml):
@@ -146,6 +144,15 @@ def _handle_listing(
         )
     except RedditApiError as exc:
         exit_for_error(exc, as_json=as_json, as_yaml=as_yaml)
+
+
+def _resolve_current_username(client: RedditClient) -> str:
+    """Resolve the current username from an authenticated session."""
+    identity = client.get_me()
+    username = identity.get("name") or client.session.username
+    if not username:
+        raise RedditApiError("Unable to resolve current username from session")
+    return username
 
 
 # ── feed ────────────────────────────────────────────────────────────
@@ -266,12 +273,13 @@ def sub_info(subreddit: str, as_json: bool, as_yaml: bool) -> None:
     cred = optional_auth()
 
     def _render(data: dict) -> None:
-        name = data.get("display_name_prefixed", f"r/{subreddit}")
-        desc = data.get("public_description", data.get("description", ""))
-        subs = data.get("subscribers", 0)
-        active = data.get("accounts_active", 0)
-        created = data.get("created_utc", 0)
-        nsfw = "🔞 NSFW" if data.get("over18") else ""
+        info = parse_subreddit_info(data)
+        name = info.display_name_prefixed or f"r/{subreddit}"
+        desc = info.public_description or info.description
+        subs = info.subscribers
+        active = info.accounts_active
+        created = info.created_utc
+        nsfw = "🔞 NSFW" if info.over18 else ""
 
         text = (
             f"[bold cyan]{name}[/bold cyan] {nsfw}\n"
@@ -302,11 +310,12 @@ def user(username: str, as_json: bool, as_yaml: bool) -> None:
     cred = optional_auth()
 
     def _render(data: dict) -> None:
-        name = data.get("name", username)
-        karma_post = data.get("link_karma", 0)
-        karma_comment = data.get("comment_karma", 0)
-        created = data.get("created_utc", 0)
-        is_gold = "⭐ " if data.get("is_gold") else ""
+        profile = parse_user_profile(data)
+        name = profile.name or username
+        karma_post = profile.link_karma
+        karma_comment = profile.comment_karma
+        created = profile.created_utc
+        is_gold = "⭐ " if profile.is_gold else ""
 
         text = (
             f"[bold cyan]u/{name}[/bold cyan] {is_gold}\n"
@@ -342,6 +351,70 @@ def user_posts(
         cred,
         action=lambda c: c.get_user_posts(username, limit=limit, after=after),
         data_title=f"📝 u/{username}'s posts",
+        as_json=as_json, as_yaml=as_yaml,
+        output_file=output_file, full_text=full_text, compact=compact,
+    )
+
+
+@click.command("user-comments")
+@click.argument("username")
+@click.option("-n", "--limit", default=25, type=int, help="Number of comments")
+@click.option("--after", default=None, help="Pagination cursor")
+@listing_options
+def user_comments(
+    username: str, limit: int, after: str | None,
+    as_json: bool, as_yaml: bool,
+    output_file: str | None, full_text: bool, compact: bool,
+) -> None:
+    """View a user's comments"""
+    cred = optional_auth()
+    _handle_listing(
+        cred,
+        action=lambda c: c.get_user_comments(username, limit=limit, after=after),
+        data_title=f"💬 u/{username}'s comments",
+        next_cmd=f"rdt user-comments {username}",
+        as_json=as_json, as_yaml=as_yaml,
+        output_file=output_file, full_text=full_text, compact=compact,
+    )
+
+
+@click.command()
+@click.option("-n", "--limit", default=25, type=int, help="Number of saved items")
+@click.option("--after", default=None, help="Pagination cursor")
+@listing_options
+def saved(
+    limit: int, after: str | None,
+    as_json: bool, as_yaml: bool,
+    output_file: str | None, full_text: bool, compact: bool,
+) -> None:
+    """Browse your saved posts"""
+    cred = require_auth()
+    _handle_listing(
+        cred,
+        action=lambda c: c.get_user_saved(_resolve_current_username(c), limit=limit, after=after),
+        data_title="🔖 Saved",
+        next_cmd="rdt saved",
+        as_json=as_json, as_yaml=as_yaml,
+        output_file=output_file, full_text=full_text, compact=compact,
+    )
+
+
+@click.command()
+@click.option("-n", "--limit", default=25, type=int, help="Number of upvoted items")
+@click.option("--after", default=None, help="Pagination cursor")
+@listing_options
+def upvoted(
+    limit: int, after: str | None,
+    as_json: bool, as_yaml: bool,
+    output_file: str | None, full_text: bool, compact: bool,
+) -> None:
+    """Browse your upvoted posts"""
+    cred = require_auth()
+    _handle_listing(
+        cred,
+        action=lambda c: c.get_user_upvoted(_resolve_current_username(c), limit=limit, after=after),
+        data_title="⬆ Upvoted",
+        next_cmd="rdt upvoted",
         as_json=as_json, as_yaml=as_yaml,
         output_file=output_file, full_text=full_text, compact=compact,
     )

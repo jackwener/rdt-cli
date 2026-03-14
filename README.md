@@ -22,10 +22,11 @@ A CLI for Reddit — browse feeds, read posts, search, and interact via reverse-
 - 🏠 **Feed** — browse home feed, popular, and /r/all
 - 📋 **Subreddits** — browse any subreddit with sort/time filters, view subreddit info
 - 📰 **Posts** — read posts and comment trees with syntax highlighting
+- 💬 **Expanded comments** — `--expand-more` loads additional `more comments` entries
 - 🔢 **Short-index navigation** — `rdt show 3` to read, `rdt open 3` to browser
 - 🔍 **Search** — full-text search with subreddit, sort, and time filters
 - 📤 **Export** — export search results to CSV or JSON; `-o file.json` on any listing
-- 👤 **Users** — view user profiles and post history
+- 👤 **Users** — view user profiles, post history, comment history, saved and upvoted items
 - ⬆️ **Interactions** — upvote/downvote, save/unsave, subscribe/unsubscribe, comment (with 1.5-4s rate-limit delay)
 - 🛡️ **Anti-detection** — consistent Chrome 133 fingerprint, `sec-ch-ua` alignment, Gaussian jitter, exponential backoff
 - 📊 **Structured output** — `--yaml`, `--json`, `--output FILE`, `--compact`, `--full-text`
@@ -79,6 +80,9 @@ rdt sub programming -s top -t week    # Sort + time filter
 rdt sub-info python                   # Subreddit info (subscribers, etc.)
 rdt user spez                         # User profile
 rdt user-posts spez                   # User's submitted posts
+rdt user-comments spez                # User's comments
+rdt saved                             # Your saved posts/items
+rdt upvoted                           # Your upvoted posts
 
 # Short index works after list commands (feed/popular/sub/search)
 rdt sub python
@@ -88,7 +92,9 @@ rdt upvote 1                          # Upvote post #1
 
 # ─── Reading ──────────────────────────────────────
 rdt read 1abc123                      # Read post by ID
+rdt read 1abc123 --expand-more        # Expand top-level "more comments"
 rdt show 3                            # Read result #3 from last listing
+rdt show 3 --expand-more              # Expand additional comments from cache-backed post
 rdt show 1 -s top                     # Sort comments by top
 rdt open 3                            # Open in browser
 
@@ -203,7 +209,7 @@ rdt_cli/
 └── commands/
     ├── _common.py        # Shared helpers (envelope, output routing, formatters)
     ├── auth.py           # login, logout, status, whoami
-    ├── browse.py         # feed, popular, all, sub, sub-info, user, user-posts, open
+    ├── browse.py         # feed, popular, all, sub, sub-info, user, user-posts, user-comments, saved, upvoted, open
     ├── post.py           # read, show
     ├── search.py         # search, export
     └── social.py         # upvote, save, subscribe, comment
@@ -268,10 +274,11 @@ The built-in Gaussian jitter delay (~1s between requests) is intentional to mimi
 - 🏠 **浏览** — 首页 Feed、Popular、/r/all
 - 📋 **子版块** — 浏览任意 subreddit（排序/时间过滤），查看子版块信息
 - 📰 **帖子** — 阅读帖子和评论树
+- 💬 **评论展开** — `--expand-more` 可展开额外评论
 - 🔢 **短索引导航** — `rdt show 3` 阅读、`rdt open 3` 浏览器打开
 - 🔍 **搜索** — 全文搜索，支持子版块、排序、时间过滤
 - 📤 **导出** — 搜索结果导出为 CSV 或 JSON
-- 👤 **用户** — 查看用户资料和发帖历史
+- 👤 **用户** — 查看用户资料、发帖历史、评论历史、收藏和点赞记录
 - ⬆️ **互动** — 点赞/踩、收藏、订阅、评论
 - 🛡️ **反风控** — Chrome 133 指纹一致性、高斯抖动延迟、指数退避重试
 - 📊 **结构化输出** — `--yaml` / `--json`，非 TTY 默认输出 YAML
@@ -318,10 +325,17 @@ rdt all                               # /r/all
 rdt sub python                        # 浏览子版块
 rdt sub programming -s top -t week    # 排序 + 时间过滤
 rdt sub-info python                   # 子版块信息
+rdt user spez                         # 用户资料
+rdt user-posts spez                   # 用户发帖
+rdt user-comments spez                # 用户评论
+rdt saved                             # 你的收藏
+rdt upvoted                           # 你的点赞
 
 # 阅读
 rdt read 1abc123                      # 按 ID 阅读帖子
+rdt read 1abc123 --expand-more        # 展开更多评论
 rdt show 3                            # 阅读最近一次列表里的第 3 条
+rdt show 3 --expand-more              # 展开缓存帖子里的更多评论
 rdt open 3                            # 在浏览器打开
 
 # 搜索

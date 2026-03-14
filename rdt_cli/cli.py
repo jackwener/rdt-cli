@@ -5,7 +5,8 @@ Usage:
     rdt feed / popular / all / sub <subreddit>
     rdt read <post_id> / show <index> / open <id_or_index>
     rdt search <query> / export <query>
-    rdt user <username> / user-posts <username>
+    rdt user <username> / user-posts <username> / user-comments <username>
+    rdt saved / upvoted
     rdt upvote / save / subscribe / comment
 """
 
@@ -48,6 +49,9 @@ cli.add_command(browse.sub)
 cli.add_command(browse.sub_info)
 cli.add_command(browse.user)
 cli.add_command(browse.user_posts)
+cli.add_command(browse.user_comments)
+cli.add_command(browse.saved)
+cli.add_command(browse.upvoted)
 cli.add_command(browse.open_post)
 
 # ─── Post commands ───────────────────────────────────────────────────

@@ -8,6 +8,8 @@ import click
 from rich.panel import Panel
 
 from ..index_cache import get_index_info, get_item_by_index
+from ..models import Comment, PostDetail
+from ..parser import parse_morechildren_response, parse_post_detail
 from ._common import (
     console,
     handle_command,
@@ -21,30 +23,55 @@ logger = logging.getLogger(__name__)
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
-def _render_post_detail(data: list | dict) -> None:
-    """Render a post with its comments."""
-    if isinstance(data, list) and len(data) >= 1:
-        # [post_listing, comments_listing]
-        post_listing = data[0]
-        post_children = post_listing.get("data", {}).get("children", [])
-        post = post_children[0].get("data", {}) if post_children else {}
+def _attach_more_comments(detail: PostDetail, more_comments: list[Comment]) -> PostDetail:
+    """Attach expanded comments back into the existing tree by parent fullname."""
+    comment_map: dict[str, Comment] = {}
 
-        comments_listing = data[1] if len(data) > 1 else {}
-        comment_children = comments_listing.get("data", {}).get("children", [])
-    else:
-        post = data if isinstance(data, dict) else {}
-        comment_children = []
+    def _walk(comment: Comment) -> None:
+        comment_map[comment.fullname] = comment
+        for reply in comment.replies:
+            _walk(reply)
+
+    for comment in detail.comments:
+        _walk(comment)
+
+    for comment in more_comments:
+        if comment.fullname in comment_map:
+            continue
+        parent = comment.parent_fullname
+        if parent == detail.post.name or not parent:
+            detail.comments.append(comment)
+            _walk(comment)
+            continue
+
+        parent_comment = comment_map.get(parent)
+        if parent_comment is not None:
+            parent_comment.replies.append(comment)
+            _walk(comment)
+        else:
+            detail.comments.append(comment)
+            _walk(comment)
+
+    detail.more_count = max(0, detail.more_count - len(more_comments))
+    detail.more_children = []
+    return detail
+
+
+def _render_post_detail(data: PostDetail | list | dict) -> None:
+    """Render a post with its comments."""
+    detail = parse_post_detail(data)
+    post = detail.post
 
     # Render post
-    title = post.get("title", "Untitled")
-    author = post.get("author", "?")
-    subreddit = post.get("subreddit", "?")
-    score = post.get("score", 0)
-    num_comments = post.get("num_comments", 0)
-    selftext = post.get("selftext", "")
-    url = post.get("url", "")
-    is_self = post.get("is_self", True)
-    permalink = post.get("permalink", "")
+    title = post.title or "Untitled"
+    author = post.author or "?"
+    subreddit = post.subreddit or "?"
+    score = post.score
+    num_comments = post.num_comments
+    selftext = post.selftext
+    url = post.url
+    is_self = post.is_self
+    permalink = post.permalink
 
     post_text = (
         f"[bold cyan]{title}[/bold cyan]\n"
@@ -68,20 +95,19 @@ def _render_post_detail(data: list | dict) -> None:
     console.print(panel)
 
     # Render comments
-    if comment_children:
+    if detail.comments:
         console.print()
-        _render_comments(comment_children, depth=0, max_depth=3)
+        _render_comments(detail.comments, depth=0, max_depth=3)
+        if detail.more_count:
+            console.print(f"[dim]... {detail.more_count} more comments not expanded[/dim]")
 
 
-def _render_comments(children: list[dict], depth: int = 0, max_depth: int = 3) -> None:
+def _render_comments(children, depth: int = 0, max_depth: int = 3) -> None:
     """Recursively render comment tree."""
-    for child in children:
-        if child.get("kind") != "t1":
-            continue
-        comment = child.get("data", {})
-        author = comment.get("author", "[deleted]")
-        body = comment.get("body", "")
-        score = comment.get("score", 0)
+    for comment in children:
+        author = comment.author or "[deleted]"
+        body = comment.body
+        score = comment.score
 
         indent = "  " * depth
         score_color = "yellow" if score > 0 else "red" if score < 0 else "dim"
@@ -99,11 +125,8 @@ def _render_comments(children: list[dict], depth: int = 0, max_depth: int = 3) -
 
         # Render replies
         if depth < max_depth:
-            replies = comment.get("replies", "")
-            if isinstance(replies, dict):
-                reply_children = replies.get("data", {}).get("children", [])
-                if reply_children:
-                    _render_comments(reply_children, depth=depth + 1, max_depth=max_depth)
+            if comment.replies:
+                _render_comments(comment.replies, depth=depth + 1, max_depth=max_depth)
 
 
 # ── read ────────────────────────────────────────────────────────────
@@ -117,20 +140,27 @@ def _render_comments(children: list[dict], depth: int = 0, max_depth: int = 3) -
     help="Comment sort",
 )
 @click.option("-n", "--limit", default=25, type=int, help="Number of comments")
+@click.option("--expand-more", is_flag=True, help="Expand top-level 'more comments' entries")
 @structured_output_options
-def read(post_id: str, sort: str, limit: int, as_json: bool, as_yaml: bool) -> None:
+def read(post_id: str, sort: str, limit: int, expand_more: bool, as_json: bool, as_yaml: bool) -> None:
     """Read a post and its comments by ID
 
     Example: rdt read 1abc123
     """
     cred = optional_auth()
-    handle_command(
-        cred,
-        action=lambda c: c.get_post_comments(post_id=post_id, sort=sort, limit=limit),
-        render=_render_post_detail,
-        as_json=as_json,
-        as_yaml=as_yaml,
-    )
+    def _action(client):
+        raw = client.get_post_comments(post_id=post_id, sort=sort, limit=limit)
+        if not expand_more:
+            return raw
+        detail = parse_post_detail(raw)
+        if detail.more_children:
+            expanded = client.get_more_comments(post_id, detail.more_children, sort=sort)
+            detail = _attach_more_comments(detail, parse_morechildren_response(expanded))
+        if as_json or as_yaml:
+            return detail.to_dict()
+        return detail
+
+    handle_command(cred, action=_action, render=_render_post_detail, as_json=as_json, as_yaml=as_yaml)
 
 
 # ── show (short-index) ──────────────────────────────────────────────
@@ -144,8 +174,9 @@ def read(post_id: str, sort: str, limit: int, as_json: bool, as_yaml: bool) -> N
     help="Comment sort",
 )
 @click.option("-n", "--limit", default=25, type=int, help="Number of comments")
+@click.option("--expand-more", is_flag=True, help="Expand top-level 'more comments' entries")
 @structured_output_options
-def show(index: int, sort: str, limit: int, as_json: bool, as_yaml: bool) -> None:
+def show(index: int, sort: str, limit: int, expand_more: bool, as_json: bool, as_yaml: bool) -> None:
     """Read a post by its index from last listing (e.g., rdt show 3)
 
     Use after rdt feed, rdt sub, rdt search, etc.
@@ -174,10 +205,16 @@ def show(index: int, sort: str, limit: int, as_json: bool, as_yaml: bool) -> Non
 
     # Fetch full post + comments
     cred = optional_auth()
-    handle_command(
-        cred,
-        action=lambda c: c.get_post_comments(post_id=post_id, sort=sort, limit=limit),
-        render=_render_post_detail,
-        as_json=as_json,
-        as_yaml=as_yaml,
-    )
+    def _action(client):
+        raw = client.get_post_comments(post_id=post_id, sort=sort, limit=limit)
+        if not expand_more:
+            return raw
+        detail = parse_post_detail(raw)
+        if detail.more_children:
+            expanded = client.get_more_comments(post_id, detail.more_children, sort=sort)
+            detail = _attach_more_comments(detail, parse_morechildren_response(expanded))
+        if as_json or as_yaml:
+            return detail.to_dict()
+        return detail
+
+    handle_command(cred, action=_action, render=_render_post_detail, as_json=as_json, as_yaml=as_yaml)

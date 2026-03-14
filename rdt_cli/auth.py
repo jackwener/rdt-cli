@@ -30,19 +30,48 @@ _CREDENTIAL_TTL_SECONDS = CREDENTIAL_TTL_DAYS * 86400
 class Credential:
     """Holds Reddit session cookies."""
 
-    def __init__(self, cookies: dict[str, str]):
+    def __init__(
+        self,
+        cookies: dict[str, str],
+        *,
+        source: str = "unknown",
+        username: str | None = None,
+        modhash: str | None = None,
+        saved_at: float | None = None,
+        last_verified_at: float | None = None,
+    ):
         self.cookies = cookies
+        self.source = source
+        self.username = username
+        self.modhash = modhash
+        self.saved_at = saved_at
+        self.last_verified_at = last_verified_at
 
     @property
     def is_valid(self) -> bool:
         return bool(self.cookies)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"cookies": self.cookies, "saved_at": time.time()}
+        saved_at = self.saved_at or time.time()
+        return {
+            "cookies": self.cookies,
+            "source": self.source,
+            "username": self.username,
+            "modhash": self.modhash,
+            "saved_at": saved_at,
+            "last_verified_at": self.last_verified_at,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Credential:
-        return cls(cookies=data.get("cookies", {}))
+        return cls(
+            cookies=data.get("cookies", {}),
+            source=data.get("source", "saved"),
+            username=data.get("username"),
+            modhash=data.get("modhash"),
+            saved_at=data.get("saved_at"),
+            last_verified_at=data.get("last_verified_at"),
+        )
 
     def as_cookie_header(self) -> str:
         return "; ".join(f"{k}={v}" for k, v in self.cookies.items())
@@ -54,6 +83,8 @@ class Credential:
 def save_credential(credential: Credential) -> None:
     """Save credential to disk with restricted permissions."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if credential.saved_at is None:
+        credential.saved_at = time.time()
     CREDENTIAL_FILE.write_text(json.dumps(credential.to_dict(), indent=2, ensure_ascii=False))
     CREDENTIAL_FILE.chmod(0o600)
 
@@ -131,7 +162,7 @@ if cookies:
         if result.returncode == 0 and result.stdout.strip():
             cookies = json.loads(result.stdout.strip())
             if any(k in cookies for k in REQUIRED_COOKIES):
-                cred = Credential(cookies=cookies)
+                cred = Credential(cookies=cookies, source="browser:subprocess")
                 save_credential(cred)
                 return cred
     except Exception as e:
@@ -152,7 +183,7 @@ def _extract_direct() -> Credential | None:
             jar = fn(domain_name=".reddit.com")
             cookies = {c.name: c.value for c in jar}
             if any(k in cookies for k in REQUIRED_COOKIES):
-                cred = Credential(cookies=cookies)
+                cred = Credential(cookies=cookies, source=f"browser:{fn.__name__}")
                 save_credential(cred)
                 return cred
         except Exception:

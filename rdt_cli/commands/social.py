@@ -61,15 +61,14 @@ def upvote(id_or_index: str, undo: bool, down: bool) -> None:
       rdt upvote 3 --undo    # remove vote
     """
     cred = require_auth()
-    fullname = _resolve_fullname(id_or_index)
-    if not fullname:
-        return
-
-    direction = 0 if undo else (-1 if down else 1)
-    action_label = "Unvoted" if undo else ("⬇ Downvoted" if down else "⬆ Upvoted")
-
     try:
         with RedditClient(cred) as client:
+            client.validate_session()
+            fullname = _resolve_fullname(id_or_index)
+            if not fullname:
+                return
+            direction = 0 if undo else (-1 if down else 1)
+            action_label = "Unvoted" if undo else ("⬇ Downvoted" if down else "⬆ Upvoted")
             client.vote(fullname, direction=direction)
         write_delay()
         console.print(f"[green]✅ {action_label}[/green] {fullname}")
@@ -91,12 +90,12 @@ def save(id_or_index: str, undo: bool) -> None:
       rdt save 3 --undo    # unsave
     """
     cred = require_auth()
-    fullname = _resolve_fullname(id_or_index)
-    if not fullname:
-        return
-
     try:
         with RedditClient(cred) as client:
+            client.validate_session()
+            fullname = _resolve_fullname(id_or_index)
+            if not fullname:
+                return
             if undo:
                 client.unsave_item(fullname)
                 write_delay()
@@ -128,6 +127,7 @@ def subscribe(subreddit: str, undo: bool) -> None:
 
     try:
         with RedditClient(cred) as client:
+            client.validate_session()
             client.subscribe(subreddit, action=action)
         write_delay()
         console.print(f"[green]✅ {label}[/green] r/{subreddit}")
@@ -149,15 +149,14 @@ def comment(id_or_index: str, text: str) -> None:
       rdt comment 1abc123 "Thanks for sharing"
     """
     cred = require_auth()
-    fullname = _resolve_fullname(id_or_index)
-    if not fullname:
-        return
-
     try:
         with RedditClient(cred) as client:
+            client.validate_session()
+            fullname = _resolve_fullname(id_or_index)
+            if not fullname:
+                return
             client.post_comment(fullname, text)
         write_delay()
         console.print(f"[green]✅ Comment posted[/green] on {fullname}")
     except RedditApiError as exc:
         exit_for_error(exc, prefix="Comment failed")
-
