@@ -672,7 +672,7 @@ class TestMockedBrowse:
         from rdt_cli.auth import Credential
 
         cred = Credential(cookies={"reddit_session": "test"}, username="spez")
-        with patch("rdt_cli.auth.get_credential", return_value=cred):
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
             with patch("rdt_cli.client.RedditClient.get_me", return_value={"name": "spez"}):
                 with patch("rdt_cli.client.RedditClient.get_user_saved", return_value=self._mock_listing()):
                     result = runner.invoke(cli, ["saved", "--json"])
@@ -682,7 +682,7 @@ class TestMockedBrowse:
         from rdt_cli.auth import Credential
 
         cred = Credential(cookies={"reddit_session": "test"}, username="spez")
-        with patch("rdt_cli.auth.get_credential", return_value=cred):
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
             with patch("rdt_cli.client.RedditClient.get_me", return_value={"name": "spez"}):
                 with patch("rdt_cli.client.RedditClient.get_user_upvoted", return_value=self._mock_listing()):
                     result = runner.invoke(cli, ["upvoted", "--json"])
