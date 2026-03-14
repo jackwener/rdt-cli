@@ -177,7 +177,21 @@ Use `OUTPUT=yaml|json|rich|auto` to override.
 
 rdt-cli ships with a [`SKILL.md`](./SKILL.md) that teaches AI agents how to use it.
 
-### Claude Code / Antigravity
+### Skills CLI (Recommended)
+
+```bash
+npx skills add jackwener/rdt-cli
+```
+
+Options:
+
+| Flag | Description |
+| --- | --- |
+| `-g` | Install globally (user-level, shared across projects) |
+| `-a claude-code` | Target a specific agent |
+| `-y` | Non-interactive mode |
+
+### Manual Install
 
 ```bash
 mkdir -p .agents/skills
@@ -371,7 +385,19 @@ Cookie 保存后有效期 **7 天**，超时后自动尝试从浏览器刷新。
 
 rdt-cli 自带 [`SKILL.md`](./SKILL.md)，让 AI Agent 能自动学习并使用本工具。
 
-### Claude Code / Antigravity
+### Skills CLI（推荐）
+
+```bash
+npx skills add jackwener/rdt-cli
+```
+
+| 参数 | 说明 |
+| --- | --- |
+| `-g` | 全局安装（用户级别，跨项目共享） |
+| `-a claude-code` | 指定目标 Agent |
+| `-y` | 非交互模式 |
+
+### 手动安装
 
 ```bash
 mkdir -p .agents/skills
