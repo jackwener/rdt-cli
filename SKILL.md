@@ -2,7 +2,7 @@
 name: rdt-cli
 description: Use rdt-cli for ALL Reddit operations — browsing feeds, reading posts, searching, viewing users, upvoting, saving, and subscribing. Invoke whenever the user requests any Reddit interaction.
 author: jackwener
-version: "0.2.0"
+version: "0.4.0"
 tags:
   - reddit
   - rdt
@@ -82,6 +82,7 @@ Payloads live under `.data`.
 | Command | Description | Example |
 |---------|-------------|---------|
 | `rdt feed` | Browse home feed (requires login) | `rdt feed -n 10 --json` |
+| `rdt feed --subs-only` | Subscriptions-only feed (no algorithm, sorted by time) | `rdt feed --subs-only -n 5 --json` |
 | `rdt popular` | Browse /r/popular | `rdt popular -n 5 --json` |
 | `rdt all` | Browse /r/all | `rdt all -n 10 --compact --json` |
 | `rdt sub <name>` | Browse a subreddit | `rdt sub python -s top -t week` |
@@ -146,6 +147,13 @@ All listing commands (feed, popular, all, sub, user-posts, user-comments, saved,
 | `--full-text` | Show full title without truncation |
 | `-c, --compact` | Agent-friendly compact output (fewer fields) |
 
+### Feed-specific Options
+
+| Flag | Description |
+|------|-------------|
+| `--subs-only` | Show only posts from subscribed subreddits (sorted by time, no algorithm) |
+| `--max-subs N` | Max subscriptions to fetch (default: 20) |
+
 ## Agent Workflow Examples
 
 ### Browse → Read → Upvote pipeline
@@ -183,6 +191,13 @@ rdt user-comments spez -n 10 --compact --json
 ```bash
 rdt saved -n 20 --compact --json
 rdt upvoted -n 20 --compact --json
+```
+
+### Subscriptions-only monitoring
+
+```bash
+rdt feed --subs-only -n 5 --compact --json
+rdt feed --subs-only --max-subs 10 -o subs_feed.json
 ```
 
 ### Subreddit discovery

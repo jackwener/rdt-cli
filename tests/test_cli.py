@@ -689,6 +689,63 @@ class TestMockedBrowse:
                     assert result.exit_code == 0
 
 
+# ── Mocked subs-only feed ──────────────────────────────────────────
+
+
+class TestSubsOnlyFeed:
+    """Test --subs-only flag on feed command."""
+
+    def _mock_subs_listing(self, names):
+        """Build a mock /subreddits/mine/subscriber response."""
+        return {
+            "data": {
+                "children": [{"data": {"display_name": n}} for n in names],
+                "after": None,
+            }
+        }
+
+    def _mock_sub_posts(self, subreddit, created_utc=1700000000):
+        return {
+            "data": {
+                "children": [
+                    {"data": {"id": f"{subreddit}_1", "title": f"Post from {subreddit}",
+                              "subreddit": subreddit, "author": "bob", "score": 10,
+                              "num_comments": 1, "created_utc": created_utc}},
+                ],
+                "after": None,
+            }
+        }
+
+    def test_feed_subs_only_json(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test"})
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.get_my_subscriptions", return_value=["python", "rust"]):
+                with patch("rdt_cli.client.RedditClient.get_subreddit") as mock_sub:
+                    mock_sub.side_effect = [
+                        self._mock_sub_posts("python", created_utc=1700000200),
+                        self._mock_sub_posts("rust", created_utc=1700000100),
+                    ]
+                    result = runner.invoke(cli, ["feed", "--subs-only", "--json"])
+                    assert result.exit_code == 0
+                    data = json.loads(result.output)
+                    assert data["ok"] is True
+
+    def test_feed_subs_only_empty_subscriptions(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test"})
+        with patch("rdt_cli.commands._common.get_credential", return_value=cred):
+            with patch("rdt_cli.client.RedditClient.get_my_subscriptions", return_value=[]):
+                result = runner.invoke(cli, ["feed", "--subs-only", "--json"])
+                assert result.exit_code == 0
+
+    def test_feed_help_shows_subs_only(self):
+        result = runner.invoke(cli, ["feed", "--help"])
+        assert result.exit_code == 0
+        assert "--subs-only" in result.output
+        assert "--max-subs" in result.output
+
+
 # ── Mocked search commands ──────────────────────────────────────────
 
 

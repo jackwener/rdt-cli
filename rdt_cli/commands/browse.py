@@ -159,24 +159,46 @@ def _resolve_current_username(client: RedditClient) -> str:
 
 
 @click.command()
+@click.option("--subs-only", is_flag=True, help="Show only posts from subscribed subreddits (sorted by time)")
+@click.option("--max-subs", default=20, type=int, help="Max subscriptions to fetch (default: 20)")
 @click.option("-n", "--limit", default=25, type=int, help="Number of posts (default: 25)")
 @click.option("--after", default=None, help="Pagination cursor")
 @listing_options
 def feed(
+    subs_only: bool, max_subs: int,
     limit: int, after: str | None,
     as_json: bool, as_yaml: bool,
     output_file: str | None, full_text: bool, compact: bool,
 ) -> None:
     """Browse your home feed (requires login)"""
     cred = require_auth()
-    _handle_listing(
-        cred,
-        action=lambda c: c.get_home(limit=limit, after=after),
-        data_title="🏠 Home Feed",
-        next_cmd="rdt feed",
-        as_json=as_json, as_yaml=as_yaml,
-        output_file=output_file, full_text=full_text, compact=compact,
-    )
+    if subs_only:
+        if after:
+            console.print("[yellow]⚠ --after is ignored with --subs-only[/yellow]")
+
+        def _progress(current: int, total: int, name: str) -> None:
+            if not (as_json or as_yaml):
+                console.print(f"  [dim]📡 [{current}/{total}] r/{name}[/dim]")
+
+        _handle_listing(
+            cred,
+            action=lambda c: c.get_subs_only_feed(
+                limit_per_sub=limit, max_subs=max_subs, on_progress=_progress,
+            ),
+            data_title="📡 Subscriptions Feed",
+            next_cmd="",
+            as_json=as_json, as_yaml=as_yaml,
+            output_file=output_file, full_text=full_text, compact=compact,
+        )
+    else:
+        _handle_listing(
+            cred,
+            action=lambda c: c.get_home(limit=limit, after=after),
+            data_title="🏠 Home Feed",
+            next_cmd="rdt feed",
+            as_json=as_json, as_yaml=as_yaml,
+            output_file=output_file, full_text=full_text, compact=compact,
+        )
 
 
 # ── popular ─────────────────────────────────────────────────────────

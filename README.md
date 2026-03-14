@@ -19,7 +19,7 @@ A CLI for Reddit — browse feeds, read posts, search, and interact via reverse-
 ## Features
 
 - 🔐 **Auth** — auto-extract browser cookies, status check, whoami
-- 🏠 **Feed** — browse home feed, popular, and /r/all
+- 🏠 **Feed** — browse home feed, popular, /r/all, and subscription-only feed (`--subs-only`)
 - 📋 **Subreddits** — browse any subreddit with sort/time filters, view subreddit info
 - 📰 **Posts** — read posts and comment trees with syntax highlighting
 - 💬 **Expanded comments** — `--expand-more` loads additional `more comments` entries
@@ -72,6 +72,8 @@ rdt logout                            # Clear saved cookies
 
 # ─── Browse ───────────────────────────────────────
 rdt feed                              # Home feed (requires login)
+rdt feed --subs-only                  # Subscriptions-only feed (no algorithm)
+rdt feed --subs-only -n 5 --max-subs 10  # Limit per-sub posts and max subs
 rdt popular                           # Popular posts
 rdt popular --full-text               # Show full titles
 rdt all                               # /r/all
@@ -271,7 +273,7 @@ The built-in Gaussian jitter delay (~1s between requests) is intentional to mimi
 ## 功能特性
 
 - 🔐 **认证** — 自动提取浏览器 Cookie，状态检查，用户信息
-- 🏠 **浏览** — 首页 Feed、Popular、/r/all
+- 🏠 **浏览** — 首页 Feed、Popular、/r/all、纯订阅 Feed（`--subs-only`）
 - 📋 **子版块** — 浏览任意 subreddit（排序/时间过滤），查看子版块信息
 - 📰 **帖子** — 阅读帖子和评论树
 - 💬 **评论展开** — `--expand-more` 可展开额外评论
@@ -320,6 +322,8 @@ rdt logout                            # 清除缓存的 Cookie
 
 # 浏览
 rdt feed                              # 首页 Feed（需要登录）
+rdt feed --subs-only                  # 纯订阅 Feed（无算法推荐）
+rdt feed --subs-only -n 5 --max-subs 10  # 限制每个 sub 帖子数和最大 sub 数
 rdt popular                           # 热门帖子
 rdt all                               # /r/all
 rdt sub python                        # 浏览子版块

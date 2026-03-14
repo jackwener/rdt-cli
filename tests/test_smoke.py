@@ -554,6 +554,20 @@ class TestAuthenticatedViews:
         if data:
             assert data["ok"] is True
 
+    def test_feed_subs_only(self):
+        if not _authenticated():
+            pytest.skip("Authentication required for --subs-only")
+        result = _invoke("feed", "--subs-only", "-n", "3", "--max-subs", "3")
+        assert result.exit_code == 0
+
+    def test_feed_subs_only_json(self):
+        if not _authenticated():
+            pytest.skip("Authentication required for --subs-only")
+        result, data = _invoke_json("feed", "--subs-only", "-n", "3", "--max-subs", "3")
+        assert result.exit_code == 0
+        if data:
+            assert data["ok"] is True
+
 
 # ── Pagination ─────────────────────────────────────────────────────
 

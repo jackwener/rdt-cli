@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rdt-cli"
-version = "0.3.2"
+version = "0.4.0"
 description = "A CLI for Reddit — browse feeds, read posts, search, and interact via terminal 📖"
 readme = "README.md"
 requires-python = ">=3.10"

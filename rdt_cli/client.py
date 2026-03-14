@@ -20,6 +20,7 @@ from .constants import (
     SUBREDDIT_ABOUT_URL,
     SUBREDDIT_SEARCH_URL,
     SUBSCRIBE_URL,
+    SUBSCRIPTIONS_URL,
     UNSAVE_URL,
     USER_ABOUT_URL,
     USER_COMMENTS_URL,
@@ -349,3 +350,70 @@ class RedditClient:
     def post_comment(self, parent_fullname: str, text: str) -> dict:
         """Post a comment."""
         return self._post(COMMENT_URL, data={"parent": parent_fullname, "text": text})
+
+    # ── Subscription feed ───────────────────────────────────────────
+
+    def get_my_subscriptions(
+        self, limit: int = 100, max_subs: int = 20,
+    ) -> list[str]:
+        """Get names of subscribed subreddits (up to max_subs)."""
+        names: list[str] = []
+        after: str | None = None
+        while len(names) < max_subs:
+            params: dict[str, Any] = {"limit": min(limit, 100), "raw_json": 1}
+            if after:
+                params["after"] = after
+            data = self._get(SUBSCRIPTIONS_URL, params=params)
+            children = data.get("data", {}).get("children", [])
+            if not children:
+                break
+            for child in children:
+                name = child.get("data", {}).get("display_name", "")
+                if name:
+                    names.append(name)
+                if len(names) >= max_subs:
+                    break
+            after = data.get("data", {}).get("after")
+            if not after:
+                break
+        return names
+
+    def get_subs_only_feed(
+        self,
+        limit_per_sub: int = DEFAULT_LIMIT,
+        max_subs: int = 20,
+        on_progress: Any = None,
+    ) -> dict:
+        """Aggregate newest posts from subscribed subreddits.
+
+        Returns a synthetic listing dict compatible with parse_listing().
+        """
+        subs = self.get_my_subscriptions(max_subs=max_subs)
+        if not subs:
+            return {"data": {"children": [], "after": None}}
+
+        all_posts: list[dict] = []
+        seen_ids: set[str] = set()
+
+        for i, sub_name in enumerate(subs):
+            if on_progress:
+                on_progress(i + 1, len(subs), sub_name)
+            try:
+                data = self.get_subreddit(sub_name, sort="new", limit=limit_per_sub)
+                children = data.get("data", {}).get("children", [])
+                for child in children:
+                    post = child.get("data", child)
+                    pid = post.get("id", "")
+                    if pid and pid not in seen_ids:
+                        seen_ids.add(pid)
+                        all_posts.append(child if "data" in child else {"data": child})
+            except RedditApiError as exc:
+                logger.warning("Skipping r/%s: %s", sub_name, exc)
+
+        # Sort by created_utc descending
+        all_posts.sort(
+            key=lambda c: c.get("data", {}).get("created_utc", 0),
+            reverse=True,
+        )
+
+        return {"data": {"children": all_posts, "after": None}}

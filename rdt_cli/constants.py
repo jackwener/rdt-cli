@@ -49,6 +49,7 @@ SAVE_URL = "/api/save"
 UNSAVE_URL = "/api/unsave"
 SUBSCRIBE_URL = "/api/subscribe"
 COMMENT_URL = "/api/comment"
+SUBSCRIPTIONS_URL = "/subreddits/mine/subscriber.json"
 
 # ── Request Headers (Chrome 133, macOS) ─────────────────────────────
 HEADERS = {
