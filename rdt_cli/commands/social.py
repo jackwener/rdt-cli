@@ -130,3 +130,29 @@ def subscribe(subreddit: str, undo: bool) -> None:
         console.print(f"[green]✅ {label}[/green] r/{subreddit}")
     except RedditApiError as exc:
         console.print(f"[red]❌ Subscribe failed: {exc}[/red]")
+
+
+# ── comment ─────────────────────────────────────────────────────────
+
+
+@click.command()
+@click.argument("id_or_index")
+@click.argument("text")
+def comment(id_or_index: str, text: str) -> None:
+    """Post a comment on a post (by ID or index number)
+
+    Examples:
+      rdt comment 3 "Great post!"
+      rdt comment 1abc123 "Thanks for sharing"
+    """
+    cred = require_auth()
+    fullname = _resolve_fullname(id_or_index)
+    if not fullname:
+        return
+
+    try:
+        with RedditClient(cred) as client:
+            client.post_comment(fullname, text)
+        console.print(f"[green]✅ Comment posted[/green] on {fullname}")
+    except RedditApiError as exc:
+        console.print(f"[red]❌ Comment failed: {exc}[/red]")

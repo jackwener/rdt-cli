@@ -70,6 +70,19 @@ class TestPopular:
 
 
 @smoke
+class TestAll:
+    def test_all(self):
+        result = _invoke("all", "-n", "3")
+        assert result.exit_code == 0
+
+    def test_all_json(self):
+        result, data = _invoke_json("all", "-n", "3")
+        assert result.exit_code == 0
+        if data:
+            assert "data" in data
+
+
+@smoke
 class TestSubreddit:
     def test_sub_hot(self):
         result = _invoke("sub", "python", "-n", "5")
@@ -81,6 +94,10 @@ class TestSubreddit:
 
     def test_sub_top_week(self):
         result = _invoke("sub", "python", "-s", "top", "-t", "week", "-n", "3")
+        assert result.exit_code == 0
+
+    def test_sub_rising(self):
+        result = _invoke("sub", "python", "-s", "rising", "-n", "3")
         assert result.exit_code == 0
 
     def test_sub_json(self):
@@ -105,6 +122,13 @@ class TestSubInfo:
         assert result.exit_code == 0
         if data:
             assert "display_name" in data or "subscribers" in data
+
+    def test_sub_info_large(self):
+        """Test with a very large subreddit."""
+        result, data = _invoke_json("sub-info", "AskReddit")
+        assert result.exit_code == 0
+        if data and "subscribers" in data:
+            assert data["subscribers"] > 1_000_000
 
 
 @smoke
@@ -158,6 +182,10 @@ class TestSearch:
         if data:
             assert "data" in data
 
+    def test_search_sort_comments(self):
+        result = _invoke("search", "reddit", "-s", "comments", "-n", "3")
+        assert result.exit_code == 0
+
 
 # ── Post reading ────────────────────────────────────────────────────
 
@@ -174,6 +202,16 @@ class TestShow:
     def test_show_no_cache(self):
         # Without prior search, show should say no cache
         result = _invoke("show", "1")
+        assert result.exit_code == 0
+
+
+# ── Open ────────────────────────────────────────────────────────────
+
+
+@smoke
+class TestOpen:
+    def test_open_no_cache(self):
+        result = _invoke("open", "1")
         assert result.exit_code == 0
 
 
@@ -197,6 +235,22 @@ class TestExport:
         result = runner.invoke(cli, ["export", "python", "-n", "3", "-o", outfile])
         assert result.exit_code == 0
 
+    def test_export_json_file(self, tmp_path):
+        outfile = str(tmp_path / "test.json")
+        result = runner.invoke(cli, ["export", "python", "-n", "3", "--format", "json", "-o", outfile])
+        assert result.exit_code == 0
+
+
+# ── Comment (help only, no auth) ────────────────────────────────────
+
+
+@smoke
+class TestComment:
+    def test_comment_help(self):
+        result = _invoke("comment", "--help")
+        assert result.exit_code == 0
+        assert "comment" in result.output.lower()
+
 
 # ── Roundtrip workflows ────────────────────────────────────────────
 
@@ -219,6 +273,17 @@ class TestRoundtrip:
         r2 = _invoke("show", "1")
         assert r2.exit_code == 0
 
+    def test_popular_then_open(self):
+        """E2E: popular → open #1 (mocked to avoid browser popup)."""
+        r1 = _invoke("popular", "-n", "3")
+        assert r1.exit_code == 0
+
+        # Don't actually open browser in test
+        from unittest.mock import patch
+        with patch("rdt_cli.commands.browse.open_url"):
+            r2 = _invoke("open", "1")
+            assert r2.exit_code == 0
+
     def test_multi_command(self):
         """Multiple commands in sequence."""
         for cmd in [
@@ -228,3 +293,11 @@ class TestRoundtrip:
         ]:
             result = _invoke(*cmd)
             assert result.exit_code == 0, f"{cmd} failed: {result.output}"
+
+    def test_search_then_export(self):
+        """E2E: search then export same query."""
+        r1 = _invoke("search", "python", "-n", "3")
+        assert r1.exit_code == 0
+
+        r2 = _invoke("export", "python", "-n", "3", "--format", "json")
+        assert r2.exit_code == 0

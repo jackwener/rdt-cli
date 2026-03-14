@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import sys
-import textwrap
 
 import click
-from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.table import Table
 
 from ..client import RedditClient
 from ..exceptions import RedditApiError
 from ..index_cache import get_index_info, get_item_by_index
-from ._common import console, output_or_render, structured_output_options
+from ._common import console, format_score, output_or_render, structured_output_options
 
 logger = logging.getLogger(__name__)
 

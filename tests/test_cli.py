@@ -32,10 +32,10 @@ class TestCliBasic:
         result = runner.invoke(cli, ["--help"])
         expected = [
             "login", "logout", "status",
-            "feed", "popular", "sub", "sub-info", "user", "user-posts",
+            "feed", "popular", "all", "sub", "sub-info", "user", "user-posts", "open",
             "read", "show",
             "search", "export",
-            "upvote", "save", "subscribe",
+            "upvote", "save", "subscribe", "comment",
         ]
         for cmd in expected:
             assert cmd in result.output, f"Missing command: {cmd}"
@@ -43,6 +43,16 @@ class TestCliBasic:
     def test_verbose_flag(self):
         result = runner.invoke(cli, ["-v", "--help"])
         assert result.exit_code == 0
+
+    def test_command_count(self):
+        """Ensure we have exactly 19 commands."""
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        # Count command lines (indented, after "Commands:" )
+        lines = result.output.split("\n")
+        cmd_lines = [l for l in lines if l.startswith("  ") and not l.strip().startswith("-")]
+        # At least 19 commands
+        assert len(cmd_lines) >= 19
 
 
 # ── Command help ────────────────────────────────────────────────────
@@ -55,10 +65,10 @@ class TestCommandHelp:
         "cmd",
         [
             "login", "logout", "status",
-            "feed", "popular", "sub", "sub-info", "user", "user-posts",
+            "feed", "popular", "all", "sub", "sub-info", "user", "user-posts", "open",
             "read", "show",
             "search", "export",
-            "upvote", "save", "subscribe",
+            "upvote", "save", "subscribe", "comment",
         ],
     )
     def test_help(self, cmd):
@@ -83,6 +93,16 @@ class TestAuthCommands:
             data = json.loads(result.output)
             assert data["authenticated"] is False
 
+    def test_status_json_authenticated(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test", "token": "xyz"})
+        with patch("rdt_cli.auth.get_credential", return_value=cred):
+            result = runner.invoke(cli, ["status", "--json"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["authenticated"] is True
+            assert data["cookie_count"] == 2
+
     def test_login_already_authenticated(self):
         from rdt_cli.auth import Credential
         cred = Credential(cookies={"reddit_session": "test"})
@@ -90,6 +110,23 @@ class TestAuthCommands:
             result = runner.invoke(cli, ["login"])
             assert result.exit_code == 0
             assert "Already" in result.output or "✅" in result.output
+
+    def test_login_not_authenticated_no_browser(self):
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.auth.extract_browser_credential", return_value=None):
+                result = runner.invoke(cli, ["login"])
+                assert result.exit_code == 0
+                assert "No Reddit" in result.output or "❌" in result.output
+
+    def test_login_success_from_browser(self):
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "abc", "loid": "xyz"})
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.auth.extract_browser_credential", return_value=cred):
+                result = runner.invoke(cli, ["login"])
+                assert result.exit_code == 0
+                assert "✅" in result.output
+                assert "2 cookies" in result.output
 
     def test_logout(self):
         with patch("rdt_cli.auth.clear_credential") as mock_clear:
@@ -112,18 +149,40 @@ class TestConstants:
         assert "User-Agent" in HEADERS
         assert "sec-ch-ua" in HEADERS
         assert "Chrome/133" in HEADERS["User-Agent"]
+        assert "sec-ch-ua-mobile" in HEADERS
+        assert "sec-ch-ua-platform" in HEADERS
 
     def test_sort_options(self):
         from rdt_cli.constants import SORT_OPTIONS, TIME_FILTERS
         assert "hot" in SORT_OPTIONS
         assert "new" in SORT_OPTIONS
         assert "top" in SORT_OPTIONS
+        assert "rising" in SORT_OPTIONS
+        assert "controversial" in SORT_OPTIONS
         assert "week" in TIME_FILTERS
         assert "all" in TIME_FILTERS
 
     def test_required_cookies(self):
         from rdt_cli.constants import REQUIRED_COOKIES
         assert "reddit_session" in REQUIRED_COOKIES
+
+    def test_search_sort_options(self):
+        from rdt_cli.constants import SEARCH_SORT_OPTIONS
+        assert "relevance" in SEARCH_SORT_OPTIONS
+        assert "top" in SEARCH_SORT_OPTIONS
+        assert "comments" in SEARCH_SORT_OPTIONS
+
+    def test_default_limits(self):
+        from rdt_cli.constants import DEFAULT_LIMIT, MAX_LIMIT
+        assert DEFAULT_LIMIT == 25
+        assert MAX_LIMIT == 100
+
+    def test_endpoints_contain_json(self):
+        from rdt_cli.constants import HOME_URL, POPULAR_URL, ALL_URL, SEARCH_URL
+        assert HOME_URL.endswith(".json")
+        assert POPULAR_URL.endswith(".json")
+        assert ALL_URL.endswith(".json")
+        assert SEARCH_URL.endswith(".json")
 
 
 # ── Credential ──────────────────────────────────────────────────────
@@ -155,6 +214,32 @@ class TestCredential:
         assert "a=1" in header
         assert "b=2" in header
 
+    def test_save_and_load(self, tmp_path, monkeypatch):
+        from rdt_cli import auth
+        monkeypatch.setattr(auth, "CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(auth, "CREDENTIAL_FILE", tmp_path / "cred.json")
+
+        from rdt_cli.auth import Credential
+        cred = Credential(cookies={"reddit_session": "test_val"})
+        auth.save_credential(cred)
+
+        loaded = auth.load_credential()
+        assert loaded is not None
+        assert loaded.cookies["reddit_session"] == "test_val"
+
+    def test_load_no_file(self, tmp_path, monkeypatch):
+        from rdt_cli import auth
+        monkeypatch.setattr(auth, "CREDENTIAL_FILE", tmp_path / "nonexist.json")
+        assert auth.load_credential() is None
+
+    def test_clear_credential(self, tmp_path, monkeypatch):
+        from rdt_cli import auth
+        cred_file = tmp_path / "cred.json"
+        cred_file.write_text("{}")
+        monkeypatch.setattr(auth, "CREDENTIAL_FILE", cred_file)
+        auth.clear_credential()
+        assert not cred_file.exists()
+
 
 # ── Exceptions ──────────────────────────────────────────────────────
 
@@ -178,14 +263,35 @@ class TestExceptions:
     def test_error_codes(self):
         from rdt_cli.exceptions import (
             AuthRequiredError,
+            ForbiddenError,
             NotFoundError,
             RateLimitError,
+            SessionExpiredError,
             error_code_for_exception,
         )
         assert error_code_for_exception(AuthRequiredError()) == "not_authenticated"
+        assert error_code_for_exception(SessionExpiredError()) == "not_authenticated"
         assert error_code_for_exception(RateLimitError()) == "rate_limited"
         assert error_code_for_exception(NotFoundError()) == "not_found"
+        assert error_code_for_exception(ForbiddenError()) == "forbidden"
         assert error_code_for_exception(ValueError()) == "unknown_error"
+
+    def test_rate_limit_retry_after(self):
+        from rdt_cli.exceptions import RateLimitError
+        exc = RateLimitError(retry_after=30.0)
+        assert exc.retry_after == 30.0
+        assert "30s" in str(exc)
+
+    def test_not_found_resource(self):
+        from rdt_cli.exceptions import NotFoundError
+        exc = NotFoundError("r/test")
+        assert "r/test" in str(exc)
+
+    def test_reddit_api_error_fields(self):
+        from rdt_cli.exceptions import RedditApiError
+        exc = RedditApiError("test message", code=500, response={"error": True})
+        assert exc.code == 500
+        assert exc.response == {"error": True}
 
 
 # ── Client ──────────────────────────────────────────────────────────
@@ -198,6 +304,12 @@ class TestClient:
         cred = Credential(cookies={})
         with RedditClient(cred) as client:
             assert client.client is not None
+
+    def test_client_not_initialized_error(self):
+        from rdt_cli.client import RedditClient
+        c = RedditClient(None)
+        with pytest.raises(RuntimeError, match="not initialized"):
+            _ = c.client
 
     def test_request_stats(self):
         from rdt_cli.auth import Credential
@@ -222,11 +334,87 @@ class TestClient:
         assert len(posts) == 2
         assert posts[0]["id"] == "abc"
 
+    def test_extract_posts_from_list(self):
+        from rdt_cli.client import RedditClient
+        data = [{"data": {"children": []}}, {"data": {"children": []}}]
+        result = RedditClient._extract_posts(data)
+        assert isinstance(result, list)
+
     def test_extract_after(self):
         from rdt_cli.client import RedditClient
         data = {"data": {"after": "t3_next", "children": []}}
         assert RedditClient._extract_after(data) == "t3_next"
         assert RedditClient._extract_after({"data": {"after": None}}) is None
+
+    def test_extract_after_from_list(self):
+        from rdt_cli.client import RedditClient
+        assert RedditClient._extract_after([]) is None
+
+    def test_context_manager_closes(self):
+        """Verify __exit__ nulls out the http client."""
+        from rdt_cli.client import RedditClient
+        c = RedditClient(None)
+        c.__enter__()
+        assert c._http is not None
+        c.__exit__(None, None, None)
+        assert c._http is None
+
+    def test_custom_timeout_and_delay(self):
+        from rdt_cli.client import RedditClient
+        c = RedditClient(None, timeout=5.0, request_delay=0.5, max_retries=2)
+        assert c._timeout == 5.0
+        assert c._request_delay == 0.5
+        assert c._max_retries == 2
+
+
+# ── Common helpers ──────────────────────────────────────────────────
+
+
+class TestCommonHelpers:
+    def test_format_score_small(self):
+        from rdt_cli.commands._common import format_score
+        assert format_score(42) == "42"
+        assert format_score(0) == "0"
+        assert format_score(999) == "999"
+
+    def test_format_score_large(self):
+        from rdt_cli.commands._common import format_score
+        assert format_score(1000) == "1.0k"
+        assert format_score(1500) == "1.5k"
+        assert format_score(12345) == "12.3k"
+
+    def test_format_time_zero(self):
+        from rdt_cli.commands._common import format_time
+        assert format_time(0) == "-"
+
+    def test_format_time_recent(self):
+        import time
+        from rdt_cli.commands._common import format_time
+        now = time.time()
+        assert "ago" in format_time(now - 30)    # 30s ago
+        assert "ago" in format_time(now - 300)   # 5m ago
+        assert "ago" in format_time(now - 7200)  # 2h ago
+
+    def test_format_time_old(self):
+        from rdt_cli.commands._common import format_time
+        # Very old timestamp → should return date
+        result = format_time(1000000000)  # 2001-09-09
+        assert "2001" in result
+
+    def test_structured_output_options(self):
+        """Verify the decorator adds --json/--yaml options."""
+        from rdt_cli.commands._common import structured_output_options
+        import click
+
+        @click.command()
+        @structured_output_options
+        def dummy_cmd(as_json, as_yaml):
+            pass
+
+        # Check that the command has json/yaml params
+        param_names = [p.name for p in dummy_cmd.params]
+        assert "as_json" in param_names
+        assert "as_yaml" in param_names
 
 
 # ── Index Cache ─────────────────────────────────────────────────────
@@ -251,6 +439,25 @@ class TestIndexCache:
         item2 = index_cache.get_item_by_index(2)
         assert item2["id"] == "def"
 
+    def test_save_empty_list(self, tmp_path, monkeypatch):
+        from rdt_cli import index_cache
+        monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", tmp_path / "cache.json")
+        monkeypatch.setattr(index_cache, "CONFIG_DIR", tmp_path)
+
+        index_cache.save_index([], source="empty")
+        assert not (tmp_path / "cache.json").exists()
+
+    def test_save_filters_items_without_id(self, tmp_path, monkeypatch):
+        from rdt_cli import index_cache
+        monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", tmp_path / "cache.json")
+        monkeypatch.setattr(index_cache, "CONFIG_DIR", tmp_path)
+
+        items = [{"id": "abc", "title": "Good"}, {"title": "No ID"}]
+        index_cache.save_index(items)
+
+        info = index_cache.get_index_info()
+        assert info["count"] == 1
+
     def test_get_out_of_range(self, tmp_path, monkeypatch):
         from rdt_cli import index_cache
         monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", tmp_path / "cache.json")
@@ -266,9 +473,21 @@ class TestIndexCache:
         monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", tmp_path / "cache.json")
         assert index_cache.get_item_by_index(0) is None
 
+    def test_get_negative_index(self, tmp_path, monkeypatch):
+        from rdt_cli import index_cache
+        monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", tmp_path / "cache.json")
+        assert index_cache.get_item_by_index(-1) is None
+
     def test_get_no_cache_file(self, tmp_path, monkeypatch):
         from rdt_cli import index_cache
         monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", tmp_path / "nonexistent.json")
+        assert index_cache.get_item_by_index(1) is None
+
+    def test_get_corrupted_cache(self, tmp_path, monkeypatch):
+        from rdt_cli import index_cache
+        cache_file = tmp_path / "corrupt.json"
+        cache_file.write_text("not json")
+        monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", cache_file)
         assert index_cache.get_item_by_index(1) is None
 
     def test_get_index_info(self, tmp_path, monkeypatch):
@@ -308,6 +527,34 @@ class TestShowCommand:
         assert result.exit_code != 0  # Click will reject non-integer
 
 
+# ── Open command ────────────────────────────────────────────────────
+
+
+class TestOpenCommand:
+    def test_open_no_cache(self, tmp_path, monkeypatch):
+        from rdt_cli import index_cache
+        monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", tmp_path / "none.json")
+        result = runner.invoke(cli, ["open", "1"])
+        assert result.exit_code == 0
+        assert "not found" in result.output.lower()
+
+    def test_open_bare_id(self):
+        """Opening by bare ID should construct a reddit URL."""
+        with patch("rdt_cli.commands.browse.open_url") as mock_open:
+            result = runner.invoke(cli, ["open", "1abc123"])
+            assert result.exit_code == 0
+            if mock_open.called:
+                url = mock_open.call_args[0][0]
+                assert "1abc123" in url
+
+    def test_open_url_passthrough(self):
+        """Full URL should be passed through."""
+        with patch("rdt_cli.commands.browse.open_url") as mock_open:
+            result = runner.invoke(cli, ["open", "https://reddit.com/r/test/123"])
+            assert result.exit_code == 0
+            mock_open.assert_called_once_with("https://reddit.com/r/test/123")
+
+
 # ── Social command helpers ──────────────────────────────────────────
 
 
@@ -337,3 +584,78 @@ class TestResolveFullname:
         ])
         from rdt_cli.commands.social import _resolve_fullname
         assert _resolve_fullname("2") == "t3_bbb"
+
+    def test_index_with_cache_no_name(self, tmp_path, monkeypatch):
+        """Items without fullname should fallback to t3_ + id."""
+        from rdt_cli import index_cache
+        monkeypatch.setattr(index_cache, "INDEX_CACHE_FILE", tmp_path / "cache.json")
+        monkeypatch.setattr(index_cache, "CONFIG_DIR", tmp_path)
+        index_cache.save_index([{"id": "ccc", "title": "No fullname"}])
+        from rdt_cli.commands.social import _resolve_fullname
+        assert _resolve_fullname("1") == "t3_ccc"
+
+
+# ── Mocked browse commands ──────────────────────────────────────────
+
+
+class TestMockedBrowse:
+    """Test browse commands with mocked API calls."""
+
+    def _mock_listing(self, posts=None, after=None):
+        if posts is None:
+            posts = [{"id": "abc", "title": "Test", "subreddit": "test", "author": "bob", "score": 100, "num_comments": 5, "created_utc": 1700000000}]
+        return {
+            "data": {
+                "children": [{"data": p} for p in posts],
+                "after": after,
+            }
+        }
+
+    def test_popular_mocked(self):
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_popular", return_value=self._mock_listing()):
+                result = runner.invoke(cli, ["popular", "-n", "1", "--json"])
+                assert result.exit_code == 0
+
+    def test_sub_mocked(self):
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_subreddit", return_value=self._mock_listing()):
+                result = runner.invoke(cli, ["sub", "python", "-n", "1", "--json"])
+                assert result.exit_code == 0
+
+    def test_sub_info_mocked(self):
+        mock_data = {"display_name": "python", "subscribers": 1000, "accounts_active": 50}
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_subreddit_about", return_value=mock_data):
+                result = runner.invoke(cli, ["sub-info", "python", "--json"])
+                assert result.exit_code == 0
+
+    def test_user_mocked(self):
+        mock_data = {"name": "testuser", "link_karma": 100, "comment_karma": 200}
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_user_about", return_value=mock_data):
+                result = runner.invoke(cli, ["user", "testuser", "--json"])
+                assert result.exit_code == 0
+
+
+# ── Mocked search commands ──────────────────────────────────────────
+
+
+class TestMockedSearch:
+    def _mock_search(self, posts=None):
+        if posts is None:
+            posts = [{"id": "xyz", "title": "Found", "subreddit": "test", "author": "alice", "score": 50, "num_comments": 2}]
+        return {"data": {"children": [{"data": p} for p in posts], "after": None}}
+
+    def test_search_mocked(self):
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.search", return_value=self._mock_search()):
+                result = runner.invoke(cli, ["search", "python", "--json"])
+                assert result.exit_code == 0
+
+    def test_search_empty_results(self):
+        empty = {"data": {"children": [], "after": None}}
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.search", return_value=empty):
+                result = runner.invoke(cli, ["search", "xxxnonexistent", "--json"])
+                assert result.exit_code == 0

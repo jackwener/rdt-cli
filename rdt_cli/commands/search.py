@@ -15,18 +15,12 @@ from ..client import RedditClient
 from ..constants import SEARCH_SORT_OPTIONS, TIME_FILTERS
 from ..exceptions import RedditApiError
 from ..index_cache import save_index
-from ._common import console, output_or_render, structured_output_options
+from ._common import console, format_score, output_or_render, structured_output_options
 
 logger = logging.getLogger(__name__)
 
 
-# ── Helpers ─────────────────────────────────────────────────────────
 
-
-def _format_score(score: int) -> str:
-    if score >= 1000:
-        return f"{score / 1000:.1f}k"
-    return str(score)
 
 
 def _render_search_table(posts: list[dict], query: str) -> None:
@@ -48,7 +42,7 @@ def _render_search_table(posts: list[dict], query: str) -> None:
     for i, post in enumerate(posts, 1):
         table.add_row(
             str(i),
-            _format_score(post.get("score", 0)),
+            format_score(post.get("score", 0)),
             f"r/{post.get('subreddit', '?')}",
             post.get("title", "-")[:45],
             post.get("author", "-")[:12],

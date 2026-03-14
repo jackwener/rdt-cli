@@ -1,22 +1,23 @@
-"""Browse commands: feed, subreddit, popular, user."""
+"""Browse commands: feed, subreddit, popular, all, user, open."""
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 import click
+from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from ..client import RedditClient
 from ..constants import SORT_OPTIONS, TIME_FILTERS
-from ..exceptions import RedditApiError
 from ..index_cache import save_index
 from ._common import (
     console,
+    format_score,
+    format_time,
     handle_command,
-    output_or_render,
+    open_url,
+    optional_auth,
     require_auth,
     structured_output_options,
 )
@@ -25,26 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
-
-
-def _format_score(score: int) -> str:
-    """Format score with color."""
-    if score >= 1000:
-        return f"{score / 1000:.1f}k"
-    return str(score)
-
-
-def _format_time(ts: float) -> str:
-    """Format Unix timestamp to relative time."""
-    now = datetime.now(timezone.utc).timestamp()
-    diff = now - ts
-    if diff < 3600:
-        return f"{int(diff / 60)}m ago"
-    if diff < 86400:
-        return f"{int(diff / 3600)}h ago"
-    if diff < 604800:
-        return f"{int(diff / 86400)}d ago"
-    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
 def _render_post_table(posts: list[dict], title: str, show_subreddit: bool = True) -> None:
@@ -76,7 +57,7 @@ def _render_post_table(posts: list[dict], title: str, show_subreddit: bool = Tru
 
         row = [
             str(i),
-            _format_score(post.get("score", 0)),
+            format_score(post.get("score", 0)),
         ]
         if show_subreddit:
             row.append(f"r/{post.get('subreddit', '?')}")
@@ -84,12 +65,21 @@ def _render_post_table(posts: list[dict], title: str, show_subreddit: bool = Tru
             title_text[:50],
             post.get("author", "-")[:14],
             str(post.get("num_comments", 0)),
-            _format_time(post.get("created_utc", 0)),
+            format_time(post.get("created_utc", 0)),
         ])
         table.add_row(*row)
 
     console.print(table)
     console.print(f"\n  [dim]💡 Use [bold]rdt show <#>[/bold] to read a post[/dim]")
+
+
+def _listing_render(data: dict, title: str, show_subreddit: bool = True, next_cmd: str = "") -> None:
+    """Common render for listing endpoints."""
+    posts = RedditClient._extract_posts(data)
+    _render_post_table(posts, title, show_subreddit=show_subreddit)
+    cursor = RedditClient._extract_after(data)
+    if cursor and next_cmd:
+        console.print(f"  [dim]▸ More: {next_cmd} --after {cursor}[/dim]")
 
 
 # ── feed ────────────────────────────────────────────────────────────
@@ -102,15 +92,13 @@ def _render_post_table(posts: list[dict], title: str, show_subreddit: bool = Tru
 def feed(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
     """Browse your home feed (requires login)"""
     cred = require_auth()
-
-    def _render(data: dict) -> None:
-        posts = RedditClient._extract_posts(data)
-        _render_post_table(posts, "🏠 Home Feed")
-        cursor = RedditClient._extract_after(data)
-        if cursor:
-            console.print(f"  [dim]▸ More: rdt feed --after {cursor}[/dim]")
-
-    handle_command(cred, action=lambda c: c.get_home(limit=limit, after=after), render=_render, as_json=as_json, as_yaml=as_yaml)
+    handle_command(
+        cred,
+        action=lambda c: c.get_home(limit=limit, after=after),
+        render=lambda d: _listing_render(d, "🏠 Home Feed", next_cmd="rdt feed"),
+        as_json=as_json,
+        as_yaml=as_yaml,
+    )
 
 
 # ── popular ─────────────────────────────────────────────────────────
@@ -122,18 +110,33 @@ def feed(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
 @structured_output_options
 def popular(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
     """Browse /r/popular"""
-    from ..auth import get_credential
+    cred = optional_auth()
+    handle_command(
+        cred,
+        action=lambda c: c.get_popular(limit=limit, after=after),
+        render=lambda d: _listing_render(d, "🔥 Popular", next_cmd="rdt popular"),
+        as_json=as_json,
+        as_yaml=as_yaml,
+    )
 
-    cred = get_credential()
 
-    def _render(data: dict) -> None:
-        posts = RedditClient._extract_posts(data)
-        _render_post_table(posts, "🔥 Popular")
-        cursor = RedditClient._extract_after(data)
-        if cursor:
-            console.print(f"  [dim]▸ More: rdt popular --after {cursor}[/dim]")
+# ── all ─────────────────────────────────────────────────────────────
 
-    handle_command(cred, action=lambda c: c.get_popular(limit=limit, after=after), render=_render, as_json=as_json, as_yaml=as_yaml)
+
+@click.command(name="all")
+@click.option("-n", "--limit", default=25, type=int, help="Number of posts")
+@click.option("--after", default=None, help="Pagination cursor")
+@structured_output_options
+def all_cmd(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
+    """Browse /r/all"""
+    cred = optional_auth()
+    handle_command(
+        cred,
+        action=lambda c: c.get_all(limit=limit, after=after),
+        render=lambda d: _listing_render(d, "🌍 r/all", next_cmd="rdt all"),
+        as_json=as_json,
+        as_yaml=as_yaml,
+    )
 
 
 # ── sub (subreddit) ─────────────────────────────────────────────────
@@ -148,22 +151,17 @@ def popular(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None
 @structured_output_options
 def sub(subreddit: str, sort: str, time_filter: str | None, limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
     """Browse a subreddit (e.g., rdt sub python)"""
-    from ..auth import get_credential
-
-    cred = get_credential()
-
-    def _render(data: dict) -> None:
-        posts = RedditClient._extract_posts(data)
-        emoji = {"hot": "🔥", "new": "🆕", "top": "🏆", "rising": "📈"}.get(sort, "📋")
-        _render_post_table(posts, f"{emoji} r/{subreddit} ({sort})", show_subreddit=False)
-        cursor = RedditClient._extract_after(data)
-        if cursor:
-            console.print(f"  [dim]▸ More: rdt sub {subreddit} -s {sort} --after {cursor}[/dim]")
-
+    cred = optional_auth()
+    emoji = {"hot": "🔥", "new": "🆕", "top": "🏆", "rising": "📈"}.get(sort, "📋")
     handle_command(
         cred,
         action=lambda c: c.get_subreddit(subreddit, sort=sort, limit=limit, after=after, time_filter=time_filter),
-        render=_render,
+        render=lambda d: _listing_render(
+            d,
+            f"{emoji} r/{subreddit} ({sort})",
+            show_subreddit=False,
+            next_cmd=f"rdt sub {subreddit} -s {sort}",
+        ),
         as_json=as_json,
         as_yaml=as_yaml,
     )
@@ -177,13 +175,9 @@ def sub(subreddit: str, sort: str, time_filter: str | None, limit: int, after: s
 @structured_output_options
 def sub_info(subreddit: str, as_json: bool, as_yaml: bool) -> None:
     """View subreddit info (subscribers, description)"""
-    from ..auth import get_credential
-
-    cred = get_credential()
+    cred = optional_auth()
 
     def _render(data: dict) -> None:
-        from rich.panel import Panel
-
         name = data.get("display_name_prefixed", f"r/{subreddit}")
         desc = data.get("public_description", data.get("description", ""))
         subs = data.get("subscribers", 0)
@@ -194,7 +188,7 @@ def sub_info(subreddit: str, as_json: bool, as_yaml: bool) -> None:
         text = (
             f"[bold cyan]{name}[/bold cyan] {nsfw}\n"
             f"👥 {subs:,} subscribers · 🟢 {active:,} online\n"
-            f"📅 Created: {_format_time(created)}\n"
+            f"📅 Created: {format_time(created)}\n"
         )
         if desc:
             text += f"\n{desc[:300]}"
@@ -213,13 +207,9 @@ def sub_info(subreddit: str, as_json: bool, as_yaml: bool) -> None:
 @structured_output_options
 def user(username: str, as_json: bool, as_yaml: bool) -> None:
     """View a user's profile"""
-    from ..auth import get_credential
-
-    cred = get_credential()
+    cred = optional_auth()
 
     def _render(data: dict) -> None:
-        from rich.panel import Panel
-
         name = data.get("name", username)
         karma_post = data.get("link_karma", 0)
         karma_comment = data.get("comment_karma", 0)
@@ -229,7 +219,7 @@ def user(username: str, as_json: bool, as_yaml: bool) -> None:
         text = (
             f"[bold cyan]u/{name}[/bold cyan] {is_gold}\n"
             f"📊 Post karma: {karma_post:,} · Comment karma: {karma_comment:,}\n"
-            f"📅 Account age: {_format_time(created)}\n"
+            f"📅 Account age: {format_time(created)}\n"
         )
 
         panel = Panel(text, title=f"👤 u/{name}", border_style="green")
@@ -248,12 +238,50 @@ def user(username: str, as_json: bool, as_yaml: bool) -> None:
 @structured_output_options
 def user_posts(username: str, limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
     """View a user's submitted posts"""
-    from ..auth import get_credential
+    cred = optional_auth()
+    handle_command(
+        cred,
+        action=lambda c: c.get_user_posts(username, limit=limit, after=after),
+        render=lambda d: _listing_render(d, f"📝 u/{username}'s posts"),
+        as_json=as_json,
+        as_yaml=as_yaml,
+    )
 
-    cred = get_credential()
 
-    def _render(data: dict) -> None:
-        posts = RedditClient._extract_posts(data)
-        _render_post_table(posts, f"📝 u/{username}'s posts")
+# ── open ────────────────────────────────────────────────────────────
 
-    handle_command(cred, action=lambda c: c.get_user_posts(username, limit=limit, after=after), render=_render, as_json=as_json, as_yaml=as_yaml)
+
+@click.command(name="open")
+@click.argument("id_or_index")
+def open_post(id_or_index: str) -> None:
+    """Open a post in the browser (by ID or index number)
+
+    Examples:
+      rdt open 3           # open result #3 in browser
+      rdt open 1abc123     # open by post ID
+    """
+    from ..index_cache import get_item_by_index
+
+    # Try as short-index
+    try:
+        idx = int(id_or_index)
+        item = get_item_by_index(idx)
+        if item:
+            permalink = item.get("permalink", "")
+            if permalink:
+                url = f"https://reddit.com{permalink}"
+                console.print(f"[dim]Opening: {url}[/dim]")
+                open_url(url)
+                return
+        console.print(f"[yellow]Index {idx} not found in cache[/yellow]")
+        return
+    except ValueError:
+        pass
+
+    # Bare ID or URL
+    if id_or_index.startswith("http"):
+        open_url(id_or_index)
+    else:
+        url = f"https://reddit.com/comments/{id_or_index}"
+        console.print(f"[dim]Opening: {url}[/dim]")
+        open_url(url)

@@ -2,13 +2,11 @@
 
 Usage:
     rdt login / status / logout
-    rdt feed / popular / sub <subreddit>
-    rdt read <post_id> / show <index>
-    rdt search <query>
-    rdt user <username>
-    rdt upvote <id_or_index>
-    rdt save <id_or_index>
-    rdt subscribe <subreddit>
+    rdt feed / popular / all / sub <subreddit>
+    rdt read <post_id> / show <index> / open <id_or_index>
+    rdt search <query> / export <query>
+    rdt user <username> / user-posts <username>
+    rdt upvote / save / subscribe / comment
 """
 
 from __future__ import annotations
@@ -44,10 +42,12 @@ cli.add_command(auth.status)
 
 cli.add_command(browse.feed)
 cli.add_command(browse.popular)
+cli.add_command(browse.all_cmd)
 cli.add_command(browse.sub)
 cli.add_command(browse.sub_info)
 cli.add_command(browse.user)
 cli.add_command(browse.user_posts)
+cli.add_command(browse.open_post)
 
 # ─── Post commands ───────────────────────────────────────────────────
 
@@ -64,6 +64,7 @@ cli.add_command(search.export)
 cli.add_command(social.upvote)
 cli.add_command(social.save)
 cli.add_command(social.subscribe)
+cli.add_command(social.comment)
 
 
 if __name__ == "__main__":
