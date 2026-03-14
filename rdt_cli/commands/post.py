@@ -7,10 +7,13 @@ import logging
 import click
 from rich.panel import Panel
 
-from ..client import RedditClient
-from ..exceptions import RedditApiError
 from ..index_cache import get_index_info, get_item_by_index
-from ._common import console, format_score, output_or_render, structured_output_options
+from ._common import (
+    console,
+    handle_command,
+    optional_auth,
+    structured_output_options,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +111,11 @@ def _render_comments(children: list[dict], depth: int = 0, max_depth: int = 3) -
 
 @click.command()
 @click.argument("post_id")
-@click.option("-s", "--sort", default="best", type=click.Choice(["best", "top", "new", "controversial", "old", "qa"]), help="Comment sort")
+@click.option(
+    "-s", "--sort", default="best",
+    type=click.Choice(["best", "top", "new", "controversial", "old", "qa"]),
+    help="Comment sort",
+)
 @click.option("-n", "--limit", default=25, type=int, help="Number of comments")
 @structured_output_options
 def read(post_id: str, sort: str, limit: int, as_json: bool, as_yaml: bool) -> None:
@@ -116,16 +123,14 @@ def read(post_id: str, sort: str, limit: int, as_json: bool, as_yaml: bool) -> N
 
     Example: rdt read 1abc123
     """
-    from ..auth import get_credential
-
-    cred = get_credential()
-
-    try:
-        with RedditClient(cred) as client:
-            data = client.get_post_comments(post_id=post_id, sort=sort, limit=limit)
-        output_or_render(data, as_json=as_json, as_yaml=as_yaml, render=_render_post_detail)
-    except RedditApiError as exc:
-        console.print(f"[red]❌ Failed to load post: {exc}[/red]")
+    cred = optional_auth()
+    handle_command(
+        cred,
+        action=lambda c: c.get_post_comments(post_id=post_id, sort=sort, limit=limit),
+        render=_render_post_detail,
+        as_json=as_json,
+        as_yaml=as_yaml,
+    )
 
 
 # ── show (short-index) ──────────────────────────────────────────────
@@ -133,7 +138,11 @@ def read(post_id: str, sort: str, limit: int, as_json: bool, as_yaml: bool) -> N
 
 @click.command()
 @click.argument("index", type=int)
-@click.option("-s", "--sort", default="best", type=click.Choice(["best", "top", "new", "controversial", "old", "qa"]), help="Comment sort")
+@click.option(
+    "-s", "--sort", default="best",
+    type=click.Choice(["best", "top", "new", "controversial", "old", "qa"]),
+    help="Comment sort",
+)
 @click.option("-n", "--limit", default=25, type=int, help="Number of comments")
 @structured_output_options
 def show(index: int, sort: str, limit: int, as_json: bool, as_yaml: bool) -> None:
@@ -164,13 +173,11 @@ def show(index: int, sort: str, limit: int, as_json: bool, as_yaml: bool) -> Non
     console.print()
 
     # Fetch full post + comments
-    from ..auth import get_credential
-
-    cred = get_credential()
-
-    try:
-        with RedditClient(cred) as client:
-            data = client.get_post_comments(post_id=post_id, sort=sort, limit=limit)
-        output_or_render(data, as_json=as_json, as_yaml=as_yaml, render=_render_post_detail)
-    except RedditApiError as exc:
-        console.print(f"[red]❌ Failed to load post: {exc}[/red]")
+    cred = optional_auth()
+    handle_command(
+        cred,
+        action=lambda c: c.get_post_comments(post_id=post_id, sort=sort, limit=limit),
+        render=_render_post_detail,
+        as_json=as_json,
+        as_yaml=as_yaml,
+    )

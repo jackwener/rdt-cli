@@ -15,12 +15,9 @@ from ..client import RedditClient
 from ..constants import SEARCH_SORT_OPTIONS, TIME_FILTERS
 from ..exceptions import RedditApiError
 from ..index_cache import save_index
-from ._common import console, format_score, output_or_render, structured_output_options
+from ._common import console, exit_for_error, format_score, optional_auth, output_or_render, structured_output_options
 
 logger = logging.getLogger(__name__)
-
-
-
 
 
 def _render_search_table(posts: list[dict], query: str) -> None:
@@ -31,7 +28,7 @@ def _render_search_table(posts: list[dict], query: str) -> None:
 
     save_index(posts, source=f"search:{query}")
 
-    table = Table(title=f"🔍 Search: \"{query}\" — {len(posts)} results", show_lines=True)
+    table = Table(title=f'🔍 Search: "{query}" — {len(posts)} results', show_lines=True)
     table.add_column("#", style="dim", width=3)
     table.add_column("Score", style="yellow", width=6, justify="right")
     table.add_column("Subreddit", style="magenta", max_width=15)
@@ -50,7 +47,7 @@ def _render_search_table(posts: list[dict], query: str) -> None:
         )
 
     console.print(table)
-    console.print(f"\n  [dim]💡 Use [bold]rdt show <#>[/bold] to read a result[/dim]")
+    console.print("\n  [dim]💡 Use [bold]rdt show <#>[/bold] to read a result[/dim]")
 
 
 # ── search ──────────────────────────────────────────────────────────
@@ -80,9 +77,7 @@ def search(
       rdt search "python async"
       rdt search "rust vs go" -r programming --sort top --time year
     """
-    from ..auth import get_credential
-
-    cred = get_credential()
+    cred = optional_auth()
 
     try:
         with RedditClient(cred) as client:
@@ -109,10 +104,10 @@ def search(
         # Show pagination hint
         cursor = RedditClient._extract_after(data)
         if cursor and not as_json and not as_yaml and sys.stdout.isatty():
-            console.print(f"  [dim]▸ More: rdt search \"{query}\" --after {cursor}[/dim]")
+            console.print(f'  [dim]▸ More: rdt search "{query}" --after {cursor}[/dim]')
 
     except RedditApiError as exc:
-        console.print(f"[red]❌ Search failed: {exc}[/red]")
+        exit_for_error(exc, as_json=as_json, as_yaml=as_yaml, prefix="Search failed")
 
 
 # ── export ──────────────────────────────────────────────────────────
@@ -132,9 +127,7 @@ def export(query: str, subreddit: str | None, sort: str, count: int, output_file
       rdt export "machine learning" -n 100 -o results.csv
       rdt export "python tips" --format json -o tips.json
     """
-    from ..auth import get_credential
-
-    cred = get_credential()
+    cred = optional_auth()
     all_posts: list[dict] = []
     after = None
 
@@ -189,4 +182,4 @@ def export(query: str, subreddit: str | None, sort: str, count: int, output_file
             click.echo(text)
 
     except RedditApiError as exc:
-        console.print(f"[red]❌ Export failed: {exc}[/red]")
+        exit_for_error(exc, prefix="Export failed")

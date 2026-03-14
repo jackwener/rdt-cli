@@ -13,10 +13,9 @@ import logging
 import shutil
 import subprocess
 import time
-from pathlib import Path
 from typing import Any
 
-from .constants import BASE_URL, CONFIG_DIR, CREDENTIAL_FILE, REQUIRED_COOKIES
+from .constants import CONFIG_DIR, CREDENTIAL_FILE, REQUIRED_COOKIES
 
 logger = logging.getLogger(__name__)
 

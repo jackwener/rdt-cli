@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import random
 import time
@@ -17,8 +16,6 @@ from .constants import (
     DEFAULT_LIMIT,
     HEADERS,
     HOME_URL,
-    ME_URL,
-    OAUTH_URL,
     POPULAR_URL,
     POST_COMMENTS_SHORT_URL,
     POST_COMMENTS_URL,
@@ -26,19 +23,16 @@ from .constants import (
     SEARCH_URL,
     SUBREDDIT_ABOUT_URL,
     SUBREDDIT_SEARCH_URL,
-    SUBREDDIT_URL,
     SUBSCRIBE_URL,
     UNSAVE_URL,
     USER_ABOUT_URL,
     USER_COMMENTS_URL,
     USER_POSTS_URL,
-    USER_SAVED_URL,
     VOTE_URL,
 )
 from .exceptions import (
     ForbiddenError,
     NotFoundError,
-    RateLimitError,
     RedditApiError,
     SessionExpiredError,
 )

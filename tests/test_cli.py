@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -50,7 +50,7 @@ class TestCliBasic:
         assert result.exit_code == 0
         # Count command lines (indented, after "Commands:" )
         lines = result.output.split("\n")
-        cmd_lines = [l for l in lines if l.startswith("  ") and not l.strip().startswith("-")]
+        cmd_lines = [line for line in lines if line.startswith("  ") and not line.strip().startswith("-")]
         # At least 19 commands
         assert len(cmd_lines) >= 19
 
@@ -84,14 +84,16 @@ class TestAuthCommands:
         with patch("rdt_cli.auth.get_credential", return_value=None):
             result = runner.invoke(cli, ["status"])
             assert result.exit_code == 0
-            assert "Not authenticated" in result.output or "⚠" in result.output
+            # CliRunner is non-TTY → YAML envelope by default
+            assert "authenticated: false" in result.output or "ok: true" in result.output
 
     def test_status_json_not_authenticated(self):
         with patch("rdt_cli.auth.get_credential", return_value=None):
             result = runner.invoke(cli, ["status", "--json"])
             assert result.exit_code == 0
             data = json.loads(result.output)
-            assert data["authenticated"] is False
+            assert data["ok"] is True
+            assert data["data"]["authenticated"] is False
 
     def test_status_json_authenticated(self):
         from rdt_cli.auth import Credential
@@ -100,8 +102,9 @@ class TestAuthCommands:
             result = runner.invoke(cli, ["status", "--json"])
             assert result.exit_code == 0
             data = json.loads(result.output)
-            assert data["authenticated"] is True
-            assert data["cookie_count"] == 2
+            assert data["ok"] is True
+            assert data["data"]["authenticated"] is True
+            assert data["data"]["cookie_count"] == 2
 
     def test_login_already_authenticated(self):
         from rdt_cli.auth import Credential
@@ -178,7 +181,7 @@ class TestConstants:
         assert MAX_LIMIT == 100
 
     def test_endpoints_contain_json(self):
-        from rdt_cli.constants import HOME_URL, POPULAR_URL, ALL_URL, SEARCH_URL
+        from rdt_cli.constants import ALL_URL, HOME_URL, POPULAR_URL, SEARCH_URL
         assert HOME_URL.endswith(".json")
         assert POPULAR_URL.endswith(".json")
         assert ALL_URL.endswith(".json")
@@ -389,6 +392,7 @@ class TestCommonHelpers:
 
     def test_format_time_recent(self):
         import time
+
         from rdt_cli.commands._common import format_time
         now = time.time()
         assert "ago" in format_time(now - 30)    # 30s ago
@@ -403,8 +407,9 @@ class TestCommonHelpers:
 
     def test_structured_output_options(self):
         """Verify the decorator adds --json/--yaml options."""
-        from rdt_cli.commands._common import structured_output_options
         import click
+
+        from rdt_cli.commands._common import structured_output_options
 
         @click.command()
         @structured_output_options
@@ -603,7 +608,11 @@ class TestMockedBrowse:
 
     def _mock_listing(self, posts=None, after=None):
         if posts is None:
-            posts = [{"id": "abc", "title": "Test", "subreddit": "test", "author": "bob", "score": 100, "num_comments": 5, "created_utc": 1700000000}]
+            posts = [
+                {"id": "abc", "title": "Test", "subreddit": "test",
+                 "author": "bob", "score": 100, "num_comments": 5,
+                 "created_utc": 1700000000},
+            ]
         return {
             "data": {
                 "children": [{"data": p} for p in posts],
@@ -644,7 +653,10 @@ class TestMockedBrowse:
 class TestMockedSearch:
     def _mock_search(self, posts=None):
         if posts is None:
-            posts = [{"id": "xyz", "title": "Found", "subreddit": "test", "author": "alice", "score": 50, "num_comments": 2}]
+            posts = [
+                {"id": "xyz", "title": "Found", "subreddit": "test",
+                 "author": "alice", "score": 50, "num_comments": 2},
+            ]
         return {"data": {"children": [{"data": p} for p in posts], "after": None}}
 
     def test_search_mocked(self):

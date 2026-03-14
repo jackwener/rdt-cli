@@ -9,7 +9,15 @@ description = "A CLI for Reddit — browse feeds, read posts, search, and intera
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-authors = [{ name = "jackwener" }]
+authors = [{ name = "jackwener", email = "jakevingoo@gmail.com" }]
+keywords = ["reddit", "rdt", "cli", "terminal", "api"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
 dependencies = [
     "click>=8.0",
     "rich>=13.0",
@@ -18,17 +26,34 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/jackwener/rdt-cli"
+Repository = "https://github.com/jackwener/rdt-cli"
+Issues = "https://github.com/jackwener/rdt-cli/issues"
+
 [project.scripts]
 rdt = "rdt_cli.cli:cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["rdt_cli"]
 
-[tool.pytest.ini_options]
-markers = ["smoke: end-to-end tests requiring live cookies"]
-
 [tool.ruff]
+target-version = "py310"
 line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-m 'not smoke'"
+markers = ["smoke: end-to-end tests requiring live cookies"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.4"]

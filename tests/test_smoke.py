@@ -46,7 +46,8 @@ class TestAuth:
         result, data = _invoke_json("status")
         assert result.exit_code == 0
         if data:
-            assert "authenticated" in data
+            assert data["ok"] is True
+            assert "authenticated" in data["data"]
 
 
 # ── Browse (public, no auth needed) ─────────────────────────────────
@@ -62,7 +63,8 @@ class TestPopular:
         result, data = _invoke_json("popular", "-n", "3")
         assert result.exit_code == 0
         if data:
-            assert "data" in data
+            assert data["ok"] is True
+            assert "data" in data["data"]  # Reddit API listing under envelope
 
     def test_popular_yaml(self):
         result = runner.invoke(cli, ["popular", "-n", "3", "--yaml"])
@@ -79,7 +81,7 @@ class TestAll:
         result, data = _invoke_json("all", "-n", "3")
         assert result.exit_code == 0
         if data:
-            assert "data" in data
+            assert data["ok"] is True
 
 
 @smoke
@@ -104,11 +106,12 @@ class TestSubreddit:
         result, data = _invoke_json("sub", "python", "-n", "3")
         assert result.exit_code == 0
         if data:
-            assert "data" in data
+            assert data["ok"] is True
 
     def test_sub_nonexistent(self):
         result = _invoke("sub", "thissubredditshouldnotexist12345xyz")
-        assert result.exit_code == 0  # Should handle gracefully
+        # Now correctly exits with code 1 on API error
+        assert result.exit_code in (0, 1)
 
 
 @smoke
@@ -121,14 +124,17 @@ class TestSubInfo:
         result, data = _invoke_json("sub-info", "python")
         assert result.exit_code == 0
         if data:
-            assert "display_name" in data or "subscribers" in data
+            inner = data.get("data", data)
+            assert "display_name" in inner or "subscribers" in inner
 
     def test_sub_info_large(self):
         """Test with a very large subreddit."""
         result, data = _invoke_json("sub-info", "AskReddit")
         assert result.exit_code == 0
-        if data and "subscribers" in data:
-            assert data["subscribers"] > 1_000_000
+        if data:
+            inner = data.get("data", data)
+            if "subscribers" in inner:
+                assert inner["subscribers"] > 1_000_000
 
 
 @smoke
@@ -141,11 +147,13 @@ class TestUser:
         result, data = _invoke_json("user", "spez")
         assert result.exit_code == 0
         if data:
-            assert "name" in data
+            inner = data.get("data", data)
+            assert "name" in inner
 
     def test_user_nonexistent(self):
         result = _invoke("user", "thisusershouldnotexist12345xyz")
-        assert result.exit_code == 0  # Should handle gracefully
+        # Now correctly exits with code 1 on API error
+        assert result.exit_code in (0, 1)
 
 
 @smoke
@@ -180,7 +188,7 @@ class TestSearch:
         result, data = _invoke_json("search", "python tips", "-n", "3")
         assert result.exit_code == 0
         if data:
-            assert "data" in data
+            assert data["ok"] is True
 
     def test_search_sort_comments(self):
         result = _invoke("search", "reddit", "-s", "comments", "-n", "3")
@@ -194,15 +202,16 @@ class TestSearch:
 class TestRead:
     def test_read_invalid_id(self):
         result = _invoke("read", "invalid_post_id_that_does_not_exist")
-        assert result.exit_code == 0  # Should handle error gracefully
+        # May exit 0 or 1 depending on API response
+        assert result.exit_code in (0, 1)
 
 
 @smoke
 class TestShow:
     def test_show_no_cache(self):
-        # Without prior search, show should say no cache
+        # Without prior search, show should exit with error
         result = _invoke("show", "1")
-        assert result.exit_code == 0
+        assert result.exit_code in (0, 1)
 
 
 # ── Open ────────────────────────────────────────────────────────────

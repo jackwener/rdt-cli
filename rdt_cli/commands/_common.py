@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -19,8 +20,12 @@ from ..exceptions import RedditApiError, SessionExpiredError, error_code_for_exc
 
 T = TypeVar("T")
 
-console = Console()
+console = Console(stderr=True)
 error_console = Console(stderr=True)
+_stdout = Console()
+
+_SCHEMA_VERSION = "1"
+_OUTPUT_ENV = "OUTPUT"
 
 
 # ── Shared formatters (DRY — used by browse, search, post) ──────────
@@ -50,6 +55,122 @@ def format_time(ts: float) -> str:
     if diff < 604800:
         return f"{int(diff / 86400)}d ago"
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+# ── Output format resolution ────────────────────────────────────────
+
+
+def resolve_output_format(*, as_json: bool, as_yaml: bool) -> str | None:
+    """Resolve explicit flags first, then env override, then TTY default.
+
+    Returns "json", "yaml", or None (for rich rendering).
+    """
+    if as_json and as_yaml:
+        raise click.UsageError("Use only one of --json or --yaml.")
+    if as_json:
+        return "json"
+    if as_yaml:
+        return "yaml"
+
+    output_mode = os.getenv(_OUTPUT_ENV, "auto").strip().lower()
+    if output_mode == "yaml":
+        return "yaml"
+    if output_mode == "json":
+        return "json"
+    if output_mode == "rich":
+        return None
+
+    if not sys.stdout.isatty():
+        return "yaml"
+    return None
+
+
+# ── Structured output (stable agent envelope) ──────────────────────
+
+
+def success_payload(data: Any) -> dict[str, Any]:
+    """Wrap structured success data in the shared agent schema."""
+    return {
+        "ok": True,
+        "schema_version": _SCHEMA_VERSION,
+        "data": data,
+    }
+
+
+def error_payload(code: str, message: str, *, details: Any | None = None) -> dict[str, Any]:
+    """Wrap structured error data in the shared agent schema."""
+    error: dict[str, Any] = {
+        "code": code,
+        "message": message,
+    }
+    if details is not None:
+        error["details"] = details
+    return {
+        "ok": False,
+        "schema_version": _SCHEMA_VERSION,
+        "error": error,
+    }
+
+
+def print_json(data: Any) -> None:
+    """Print raw JSON output to stdout."""
+    click.echo(json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def print_yaml(data: Any) -> None:
+    """Print raw YAML output to stdout."""
+    try:
+        import yaml
+
+        click.echo(yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False))
+    except ImportError:
+        click.echo(json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def maybe_print_structured(data: Any, *, as_json: bool, as_yaml: bool) -> bool:
+    """Print structured output (with envelope) when requested or when stdout is non-TTY.
+
+    Returns True if output was printed, False if rich rendering should be used.
+    """
+    fmt = resolve_output_format(as_json=as_json, as_yaml=as_yaml)
+    if not fmt:
+        return False
+    payload = success_payload(data)
+    if fmt == "json":
+        print_json(payload)
+    else:
+        print_yaml(payload)
+    return True
+
+
+def emit_error(
+    code: str,
+    message: str,
+    *,
+    as_json: bool | None = None,
+    as_yaml: bool | None = None,
+    details: Any | None = None,
+) -> bool:
+    """Emit a structured error when the active output mode is machine-readable.
+
+    Returns True if the error was emitted as structured output.
+    """
+    if as_json is None or as_yaml is None:
+        ctx = click.get_current_context(silent=True)
+        params = ctx.params if ctx is not None else {}
+        as_json = bool(params.get("as_json", False)) if as_json is None else as_json
+        as_yaml = bool(params.get("as_yaml", False)) if as_yaml is None else as_yaml
+
+    fmt = resolve_output_format(as_json=bool(as_json), as_yaml=bool(as_yaml))
+    if fmt is None:
+        return False
+
+    payload = error_payload(code, message, details=details)
+    if fmt == "json":
+        print_json(payload)
+    else:
+        print_yaml(payload)
+    return True
 
 
 # ── Auth / Client helpers ───────────────────────────────────────────
@@ -99,26 +220,16 @@ def handle_command(
 ) -> T | None:
     """Run a client action with structured output support.
 
-    - --json → JSON stdout
-    - --yaml or non-TTY → YAML (fallback to JSON)
+    - --json → JSON stdout (with envelope)
+    - --yaml or non-TTY → YAML (with envelope)
     - Otherwise → rich render
 
-    Accepts None credential for public endpoints.
+    On error: emits structured error + exit(1).
     """
     try:
         data = run_client_action(credential, action)
 
-        if as_json:
-            click.echo(json.dumps(data, indent=2, ensure_ascii=False))
-            return data
-
-        if as_yaml or not sys.stdout.isatty():
-            try:
-                import yaml
-
-                click.echo(yaml.dump(data, allow_unicode=True, default_flow_style=False))
-            except ImportError:
-                click.echo(json.dumps(data, indent=2, ensure_ascii=False))
+        if maybe_print_structured(data, as_json=as_json, as_yaml=as_yaml):
             return data
 
         if render:
@@ -126,23 +237,38 @@ def handle_command(
         return data
 
     except RedditApiError as exc:
-        _print_error(exc)
-        return None
+        exit_for_error(exc, as_json=as_json, as_yaml=as_yaml)
+        return None  # unreachable, but for type checker
 
 
-def handle_errors(fn: Callable[[], T]) -> T | None:
+def handle_errors(fn: Callable[[], T], *, as_json: bool = False, as_yaml: bool = False) -> T | None:
     """Run arbitrary command logic and catch RedditApiError."""
     try:
         return fn()
     except RedditApiError as exc:
-        _print_error(exc)
+        exit_for_error(exc, as_json=as_json, as_yaml=as_yaml)
         return None
 
 
-def _print_error(exc: RedditApiError) -> None:
-    """Print formatted error message."""
+def exit_for_error(
+    exc: Exception,
+    *,
+    as_json: bool = False,
+    as_yaml: bool = False,
+    prefix: str | None = None,
+) -> None:
+    """Emit a structured/non-structured error and terminate the command."""
+    message = str(exc)
+    if prefix:
+        message = f"{prefix}: {message}"
+
     code = error_code_for_exception(exc)
-    error_console.print(f"[red]❌ [{code}] {exc}[/red]")
+
+    if emit_error(code, message, as_json=as_json, as_yaml=as_yaml):
+        raise SystemExit(1) from None
+
+    error_console.print(f"[red]❌ [{code}] {message}[/red]")
+    raise SystemExit(1) from None
 
 
 def structured_output_options(command: Callable) -> Callable:
@@ -153,18 +279,10 @@ def structured_output_options(command: Callable) -> Callable:
 
 
 def output_or_render(data: Any, *, as_json: bool, as_yaml: bool, render: Callable) -> None:
-    """DRY output routing: JSON / YAML / Rich."""
-    if as_json:
-        click.echo(json.dumps(data, indent=2, ensure_ascii=False))
-    elif as_yaml or not sys.stdout.isatty():
-        try:
-            import yaml
-
-            click.echo(yaml.dump(data, allow_unicode=True, default_flow_style=False))
-        except ImportError:
-            click.echo(json.dumps(data, indent=2, ensure_ascii=False))
-    else:
-        render(data)
+    """DRY output routing: JSON / YAML (with envelope) / Rich."""
+    if maybe_print_structured(data, as_json=as_json, as_yaml=as_yaml):
+        return
+    render(data)
 
 
 def open_url(url: str) -> None:

@@ -70,7 +70,7 @@ def _render_post_table(posts: list[dict], title: str, show_subreddit: bool = Tru
         table.add_row(*row)
 
     console.print(table)
-    console.print(f"\n  [dim]💡 Use [bold]rdt show <#>[/bold] to read a post[/dim]")
+    console.print("\n  [dim]💡 Use [bold]rdt show <#>[/bold] to read a post[/dim]")
 
 
 def _listing_render(data: dict, title: str, show_subreddit: bool = True, next_cmd: str = "") -> None:
@@ -145,11 +145,18 @@ def all_cmd(limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None
 @click.command()
 @click.argument("subreddit")
 @click.option("-s", "--sort", type=click.Choice(SORT_OPTIONS), default="hot", help="Sort order")
-@click.option("-t", "--time", "time_filter", type=click.Choice(TIME_FILTERS), default=None, help="Time filter (for top/controversial)")
+@click.option(
+    "-t", "--time", "time_filter",
+    type=click.Choice(TIME_FILTERS), default=None,
+    help="Time filter (for top/controversial)",
+)
 @click.option("-n", "--limit", default=25, type=int, help="Number of posts")
 @click.option("--after", default=None, help="Pagination cursor")
 @structured_output_options
-def sub(subreddit: str, sort: str, time_filter: str | None, limit: int, after: str | None, as_json: bool, as_yaml: bool) -> None:
+def sub(
+    subreddit: str, sort: str, time_filter: str | None, limit: int,
+    after: str | None, as_json: bool, as_yaml: bool,
+) -> None:
     """Browse a subreddit (e.g., rdt sub python)"""
     cred = optional_auth()
     emoji = {"hot": "🔥", "new": "🆕", "top": "🏆", "rising": "📈"}.get(sort, "📋")
@@ -196,7 +203,11 @@ def sub_info(subreddit: str, as_json: bool, as_yaml: bool) -> None:
         panel = Panel(text, title=f"📋 {name}", border_style="cyan")
         console.print(panel)
 
-    handle_command(cred, action=lambda c: c.get_subreddit_about(subreddit), render=_render, as_json=as_json, as_yaml=as_yaml)
+    handle_command(
+        cred,
+        action=lambda c: c.get_subreddit_about(subreddit),
+        render=_render, as_json=as_json, as_yaml=as_yaml,
+    )
 
 
 # ── user ────────────────────────────────────────────────────────────

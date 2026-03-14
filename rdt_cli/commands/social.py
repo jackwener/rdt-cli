@@ -1,4 +1,4 @@
-"""Social / interaction commands: upvote, save, subscribe."""
+"""Social / interaction commands: upvote, save, subscribe, comment."""
 
 from __future__ import annotations
 
@@ -7,8 +7,7 @@ import click
 from ..client import RedditClient
 from ..exceptions import RedditApiError
 from ..index_cache import get_item_by_index
-from ._common import console, require_auth
-
+from ._common import console, exit_for_error, require_auth
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -74,7 +73,7 @@ def upvote(id_or_index: str, undo: bool, down: bool) -> None:
             client.vote(fullname, direction=direction)
         console.print(f"[green]✅ {action_label}[/green] {fullname}")
     except RedditApiError as exc:
-        console.print(f"[red]❌ Vote failed: {exc}[/red]")
+        exit_for_error(exc, prefix="Vote failed")
 
 
 # ── save / unsave ──────────────────────────────────────────────────
@@ -104,7 +103,7 @@ def save(id_or_index: str, undo: bool) -> None:
                 client.save_item(fullname)
                 console.print(f"[green]✅ Saved[/green] {fullname}")
     except RedditApiError as exc:
-        console.print(f"[red]❌ Save failed: {exc}[/red]")
+        exit_for_error(exc, prefix="Save failed")
 
 
 # ── subscribe / unsubscribe ────────────────────────────────────────
@@ -129,7 +128,7 @@ def subscribe(subreddit: str, undo: bool) -> None:
             client.subscribe(subreddit, action=action)
         console.print(f"[green]✅ {label}[/green] r/{subreddit}")
     except RedditApiError as exc:
-        console.print(f"[red]❌ Subscribe failed: {exc}[/red]")
+        exit_for_error(exc, prefix="Subscribe failed")
 
 
 # ── comment ─────────────────────────────────────────────────────────
@@ -155,4 +154,4 @@ def comment(id_or_index: str, text: str) -> None:
             client.post_comment(fullname, text)
         console.print(f"[green]✅ Comment posted[/green] on {fullname}")
     except RedditApiError as exc:
-        console.print(f"[red]❌ Comment failed: {exc}[/red]")
+        exit_for_error(exc, prefix="Comment failed")
