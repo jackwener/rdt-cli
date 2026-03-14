@@ -198,12 +198,9 @@ mkdir -p .agents/skills
 git clone git@github.com:jackwener/rdt-cli.git .agents/skills/rdt-cli
 ```
 
-### OpenClaw / ClawHub
+### ~~OpenClaw / ClawHub~~ (Deprecated)
 
-```bash
-clawhub install rdt-cli
-```
-
+> ⚠️ ClawHub 安装方式已过时，不再支持。请使用上方的 [Skills CLI](#skills-cli-recommended) 或手动安装。
 ## Project Structure
 
 ```text
@@ -402,11 +399,9 @@ mkdir -p .agents/skills
 git clone git@github.com:jackwener/rdt-cli.git .agents/skills/rdt-cli
 ```
 
-### OpenClaw / ClawHub
+### ~~OpenClaw / ClawHub~~（已过时）
 
-```bash
-clawhub install rdt-cli
-```
+> ⚠️ ClawHub 安装方式已过时，不再支持。请使用上方的 Skills CLI 或手动安装。
 
 ## License
 
