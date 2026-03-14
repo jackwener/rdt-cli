@@ -310,3 +310,220 @@ class TestRoundtrip:
 
         r2 = _invoke("export", "python", "-n", "3", "--format", "json")
         assert r2.exit_code == 0
+
+    def test_search_then_show_json(self):
+        """E2E: search → show #1 --json (structured)."""
+        r1 = _invoke("search", "python", "-n", "3")
+        assert r1.exit_code == 0
+
+        r2, data = _invoke_json("show", "1")
+        assert r2.exit_code == 0
+        if data:
+            assert data["ok"] is True
+
+
+# ── New features: --full-text, --output, --compact ──────────────────
+
+
+@smoke
+class TestFullText:
+    def test_popular_full_text(self):
+        result = _invoke("popular", "-n", "3", "--full-text")
+        assert result.exit_code == 0
+
+    def test_sub_full_text(self):
+        result = _invoke("sub", "python", "-n", "3", "--full-text")
+        assert result.exit_code == 0
+
+    def test_search_full_text(self):
+        result = _invoke("search", "python", "-n", "3", "--full-text")
+        assert result.exit_code == 0
+
+
+@smoke
+class TestCompact:
+    def test_popular_compact_json(self):
+        result, data = _invoke_json("popular", "-n", "3", "--compact")
+        assert result.exit_code == 0
+        if data and data.get("ok"):
+            items = data["data"]
+            if isinstance(items, list) and items:
+                # Compact should strip non-essential fields
+                assert "title" in items[0]
+                assert "score" in items[0]
+
+    def test_search_compact_json(self):
+        result, data = _invoke_json("search", "python", "-n", "3", "--compact")
+        assert result.exit_code == 0
+        if data and data.get("ok"):
+            items = data["data"]
+            if isinstance(items, list) and items:
+                assert "title" in items[0]
+
+
+@smoke
+class TestOutputFile:
+    def test_popular_output_json(self, tmp_path):
+        outfile = str(tmp_path / "popular.json")
+        result = runner.invoke(
+            cli, ["popular", "-n", "3", "-o", outfile],
+        )
+        assert result.exit_code == 0
+        import os
+        assert os.path.exists(outfile)
+        with open(outfile) as f:
+            data = json.load(f)
+        assert data["ok"] is True
+
+    def test_search_output_json(self, tmp_path):
+        outfile = str(tmp_path / "search.json")
+        result = runner.invoke(
+            cli, ["search", "python", "-n", "3", "-o", outfile],
+        )
+        assert result.exit_code == 0
+        import os
+        assert os.path.exists(outfile)
+
+    def test_sub_output_compact(self, tmp_path):
+        outfile = str(tmp_path / "sub.json")
+        result = runner.invoke(
+            cli, ["sub", "python", "-n", "3", "--compact", "-o", outfile],
+        )
+        assert result.exit_code == 0
+        import os
+        assert os.path.exists(outfile)
+        with open(outfile) as f:
+            data = json.load(f)
+        assert data["ok"] is True
+        if isinstance(data["data"], list) and data["data"]:
+            assert "title" in data["data"][0]
+
+
+# ── YAML envelope validation ───────────────────────────────────────
+
+
+@smoke
+class TestYamlEnvelope:
+    def test_status_yaml(self):
+        result = runner.invoke(cli, ["status", "--yaml"])
+        assert result.exit_code == 0
+        assert "ok: true" in result.output
+        assert "schema_version" in result.output
+
+    def test_sub_info_yaml(self):
+        result = runner.invoke(cli, ["sub-info", "python", "--yaml"])
+        assert result.exit_code == 0
+        assert "ok: true" in result.output
+
+
+# ── Miscellaneous coverage ─────────────────────────────────────────
+
+
+@smoke
+class TestMisc:
+    def test_version(self):
+        result = _invoke("--version")
+        assert result.exit_code == 0
+        assert "rdt-cli" in result.output or "0." in result.output
+
+    def test_sub_controversial(self):
+        result = _invoke("sub", "python", "-s", "controversial", "-n", "3")
+        assert result.exit_code == 0
+
+    def test_whoami_help(self):
+        result = _invoke("whoami", "--help")
+        assert result.exit_code == 0
+        output = result.output.lower()
+        assert "profile" in output or "karma" in output or "whoami" in output
+
+    def test_user_posts_full_text(self):
+        result = _invoke("user-posts", "spez", "-n", "3", "--full-text")
+        assert result.exit_code == 0
+
+
+# ── Positive read test ─────────────────────────────────────────────
+
+
+@smoke
+class TestReadPositive:
+    def test_read_real_post(self):
+        """Search → get a real post ID → read it."""
+        r1, data = _invoke_json("search", "python", "-n", "1")
+        assert r1.exit_code == 0
+        if not data or not data.get("ok"):
+            pytest.skip("Search returned no data")
+
+        # Extract a post ID from search results
+        from rdt_cli.client import RedditClient
+        inner = data.get("data", {})
+        posts = RedditClient._extract_posts(inner)
+        if not posts:
+            pytest.skip("No posts in search results")
+
+        post_id = posts[0].get("id", "")
+        if not post_id:
+            pytest.skip("Post has no ID")
+
+        r2 = _invoke("read", post_id)
+        assert r2.exit_code == 0
+
+    def test_read_real_post_json(self):
+        """Search → read post --json."""
+        r1, data = _invoke_json("search", "python tips", "-n", "1")
+        assert r1.exit_code == 0
+        if not data or not data.get("ok"):
+            pytest.skip("Search returned no data")
+
+        from rdt_cli.client import RedditClient
+        inner = data.get("data", {})
+        posts = RedditClient._extract_posts(inner)
+        if not posts:
+            pytest.skip("No posts")
+
+        post_id = posts[0].get("id", "")
+        if not post_id:
+            pytest.skip("No ID")
+
+        r2, r2_data = _invoke_json("read", post_id)
+        assert r2.exit_code == 0
+        if r2_data:
+            assert r2_data["ok"] is True
+
+
+# ── Pagination ─────────────────────────────────────────────────────
+
+
+@smoke
+class TestPagination:
+    def test_popular_pagination(self):
+        """Fetch page 1, extract cursor, fetch page 2."""
+        r1, data = _invoke_json("popular", "-n", "3")
+        assert r1.exit_code == 0
+        if not data or not data.get("ok"):
+            pytest.skip("No data")
+
+        inner = data.get("data", {})
+        from rdt_cli.client import RedditClient
+        cursor = RedditClient._extract_after(inner)
+        if not cursor:
+            pytest.skip("No pagination cursor")
+
+        r2 = _invoke("popular", "-n", "3", "--after", cursor)
+        assert r2.exit_code == 0
+
+    def test_search_pagination(self):
+        """Search page 1, extract cursor, fetch page 2."""
+        r1, data = _invoke_json("search", "python", "-n", "3")
+        assert r1.exit_code == 0
+        if not data or not data.get("ok"):
+            pytest.skip("No data")
+
+        inner = data.get("data", {})
+        from rdt_cli.client import RedditClient
+        cursor = RedditClient._extract_after(inner)
+        if not cursor:
+            pytest.skip("No pagination cursor")
+
+        r2 = _invoke("search", "python", "-n", "3", "--after", cursor)
+        assert r2.exit_code == 0
+
