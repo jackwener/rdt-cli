@@ -130,8 +130,10 @@ def search(
 
         # --compact: strip fields for structured output
         out_data = data
-        if compact and (as_json or as_yaml):
+        if compact:
             out_data = [post.to_dict() for post in posts]
+            if not as_json and not as_yaml:
+                as_yaml = True
 
         if maybe_print_structured(out_data, as_json=as_json, as_yaml=as_yaml):
             # Show pagination hint

@@ -128,8 +128,10 @@ def _handle_listing(
             return
 
         # --compact: strip fields for structured output
-        if compact and (as_json or as_yaml):
+        if compact:
             data = [post.to_dict() for post in parse_listing(data).items]
+            if not as_json and not as_yaml:
+                as_yaml = True
 
         # --json/--yaml: structured output
         if maybe_print_structured(data, as_json=as_json, as_yaml=as_yaml):
