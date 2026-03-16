@@ -11,8 +11,10 @@ from ..index_cache import get_index_info, get_item_by_index
 from ..models import Comment, PostDetail
 from ..parser import parse_morechildren_response, parse_post_detail
 from ._common import (
+    compact_post_detail,
     console,
     handle_command,
+    maybe_print_structured,
     optional_auth,
     structured_output_options,
 )
@@ -129,6 +131,17 @@ def _render_comments(children, depth: int = 0, max_depth: int = 3) -> None:
                 _render_comments(comment.replies, depth=depth + 1, max_depth=max_depth)
 
 
+def _post_detail_options(command):
+    """Add --json/--yaml/--compact options for post detail commands."""
+    command = click.option(
+        "-c", "--compact", is_flag=True,
+        help="Compact output (fewer fields, agent-friendly)",
+    )(command)
+    command = click.option("--yaml", "as_yaml", is_flag=True, help="Output as YAML")(command)
+    command = click.option("--json", "as_json", is_flag=True, help="Output as JSON")(command)
+    return command
+
+
 # ── read ────────────────────────────────────────────────────────────
 
 
@@ -141,26 +154,32 @@ def _render_comments(children, depth: int = 0, max_depth: int = 3) -> None:
 )
 @click.option("-n", "--limit", default=25, type=int, help="Number of comments")
 @click.option("--expand-more", is_flag=True, help="Expand top-level 'more comments' entries")
-@structured_output_options
-def read(post_id: str, sort: str, limit: int, expand_more: bool, as_json: bool, as_yaml: bool) -> None:
+@_post_detail_options
+def read(post_id: str, sort: str, limit: int, expand_more: bool, as_json: bool, as_yaml: bool, compact: bool) -> None:
     """Read a post and its comments by ID
 
     Example: rdt read 1abc123
     """
     cred = optional_auth()
+
     def _action(client):
         raw = client.get_post_comments(post_id=post_id, sort=sort, limit=limit)
-        if not expand_more:
-            return raw
         detail = parse_post_detail(raw)
-        if detail.more_children:
+        if expand_more and detail.more_children:
             expanded = client.get_more_comments(post_id, detail.more_children, sort=sort)
             detail = _attach_more_comments(detail, parse_morechildren_response(expanded))
+        if compact:
+            return compact_post_detail(detail)
         if as_json or as_yaml:
             return detail.to_dict()
         return detail
 
-    handle_command(cred, action=_action, render=_render_post_detail, as_json=as_json, as_yaml=as_yaml)
+    _as_json = as_json
+    _as_yaml = as_yaml
+    if compact and not as_json and not as_yaml:
+        _as_yaml = True
+
+    handle_command(cred, action=_action, render=_render_post_detail, as_json=_as_json, as_yaml=_as_yaml)
 
 
 # ── show (short-index) ──────────────────────────────────────────────
@@ -175,8 +194,8 @@ def read(post_id: str, sort: str, limit: int, expand_more: bool, as_json: bool, 
 )
 @click.option("-n", "--limit", default=25, type=int, help="Number of comments")
 @click.option("--expand-more", is_flag=True, help="Expand top-level 'more comments' entries")
-@structured_output_options
-def show(index: int, sort: str, limit: int, expand_more: bool, as_json: bool, as_yaml: bool) -> None:
+@_post_detail_options
+def show(index: int, sort: str, limit: int, expand_more: bool, as_json: bool, as_yaml: bool, compact: bool) -> None:
     """Read a post by its index from last listing (e.g., rdt show 3)
 
     Use after rdt feed, rdt sub, rdt search, etc.
@@ -205,16 +224,22 @@ def show(index: int, sort: str, limit: int, expand_more: bool, as_json: bool, as
 
     # Fetch full post + comments
     cred = optional_auth()
+
     def _action(client):
         raw = client.get_post_comments(post_id=post_id, sort=sort, limit=limit)
-        if not expand_more:
-            return raw
         detail = parse_post_detail(raw)
-        if detail.more_children:
+        if expand_more and detail.more_children:
             expanded = client.get_more_comments(post_id, detail.more_children, sort=sort)
             detail = _attach_more_comments(detail, parse_morechildren_response(expanded))
+        if compact:
+            return compact_post_detail(detail)
         if as_json or as_yaml:
             return detail.to_dict()
         return detail
 
-    handle_command(cred, action=_action, render=_render_post_detail, as_json=as_json, as_yaml=as_yaml)
+    _as_json = as_json
+    _as_yaml = as_yaml
+    if compact and not as_json and not as_yaml:
+        _as_yaml = True
+
+    handle_command(cred, action=_action, render=_render_post_detail, as_json=_as_json, as_yaml=_as_yaml)

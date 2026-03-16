@@ -91,7 +91,7 @@ class TestAuthCommands:
             result = runner.invoke(cli, ["status"])
             assert result.exit_code == 0
             # CliRunner is non-TTY → YAML envelope by default
-            assert "authenticated: false" in result.output or "ok: true" in result.output
+            assert "authenticated" in result.output and "false" in result.output
 
     def test_status_json_not_authenticated(self):
         with patch("rdt_cli.auth.get_credential", return_value=None):
@@ -788,3 +788,184 @@ class TestMoreComments:
                     assert data["ok"] is True
                     assert data["data"]["post"]["id"] == "abc123"
                     assert any(comment["id"] == "c3" for comment in data["data"]["comments"])
+
+
+# ── Issue #4: YAML special chars ────────────────────────────────────
+
+
+class TestYamlSpecialChars:
+    """YAML output should be parseable even with colons, quotes, multi-line in values."""
+
+    def test_yaml_with_colons(self):
+        import yaml
+        from rdt_cli.commands._common import print_yaml
+
+        data = {"title": "AMC Theatres: a story", "selftext": "key: value inside text"}
+        # Capture output
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            print_yaml(data)
+        output = buf.getvalue()
+
+        # Must be parseable
+        parsed = yaml.safe_load(output)
+        assert parsed["title"] == "AMC Theatres: a story"
+        assert parsed["selftext"] == "key: value inside text"
+
+    def test_yaml_with_special_chars(self):
+        import yaml
+        from rdt_cli.commands._common import print_yaml
+
+        data = {
+            "selftext": 'He said "hello" and # commented\nSecond line: yes',
+            "score": 42,
+        }
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            print_yaml(data)
+        output = buf.getvalue()
+
+        parsed = yaml.safe_load(output)
+        assert parsed["score"] == 42
+        assert "hello" in parsed["selftext"]
+
+    def test_yaml_roundtrip_envelope(self):
+        """Full envelope with special chars should roundtrip."""
+        import yaml
+        from rdt_cli.commands._common import print_yaml, success_payload
+
+        payload = success_payload([{
+            "title": "Test: colon",
+            "selftext": "line1\nline2: continued",
+            "author": "user#1",
+        }])
+
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            print_yaml(payload)
+        output = buf.getvalue()
+        parsed = yaml.safe_load(output)
+        assert parsed["ok"] is True
+        assert parsed["data"][0]["title"] == "Test: colon"
+
+
+# ── Issue #5: read --compact ────────────────────────────────────────
+
+
+class TestReadCompact:
+    """read/show --compact should produce flat, agent-friendly output."""
+
+    def _mock_post_detail(self):
+        return [
+            {
+                "data": {
+                    "children": [
+                        {
+                            "kind": "t3",
+                            "data": {
+                                "id": "test123",
+                                "name": "t3_test123",
+                                "title": "Test Post",
+                                "subreddit": "testing",
+                                "author": "alice",
+                                "score": 42,
+                                "num_comments": 3,
+                                "selftext": "Hello world",
+                                "permalink": "/r/testing/comments/test123/test/",
+                                "url": "https://reddit.com/r/testing/comments/test123/test/",
+                                "is_self": True,
+                            },
+                        }
+                    ],
+                }
+            },
+            {
+                "data": {
+                    "children": [
+                        {
+                            "kind": "t1",
+                            "data": {
+                                "id": "c1",
+                                "name": "t1_c1",
+                                "author": "bob",
+                                "body": "Great post!",
+                                "score": 10,
+                                "parent_id": "t3_test123",
+                                "created_utc": 1700000000,
+                                "replies": {
+                                    "data": {
+                                        "children": [
+                                            {
+                                                "kind": "t1",
+                                                "data": {
+                                                    "id": "c2",
+                                                    "name": "t1_c2",
+                                                    "author": "carol",
+                                                    "body": "Thanks!",
+                                                    "score": 5,
+                                                    "parent_id": "t1_c1",
+                                                    "created_utc": 1700000010,
+                                                    "replies": "",
+                                                },
+                                            }
+                                        ]
+                                    }
+                                },
+                            },
+                        }
+                    ],
+                }
+            },
+        ]
+
+    def test_read_compact_json(self):
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_post_comments", return_value=self._mock_post_detail()):
+                result = runner.invoke(cli, ["read", "test123", "--compact", "--json"])
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                assert data["ok"] is True
+                post = data["data"]["post"]
+                assert post["id"] == "test123"
+                assert post["title"] == "Test Post"
+                assert post["author"] == "alice"
+                # Comments should be flat with depth
+                comments = data["data"]["comments"]
+                assert len(comments) == 2
+                assert comments[0]["author"] == "bob"
+                assert comments[0]["depth"] == 0
+                assert comments[1]["author"] == "carol"
+                assert comments[1]["depth"] == 1
+                # Compact should NOT have nested fields
+                assert "fullname" not in comments[0]
+                assert "replies" not in comments[0]
+
+    def test_read_compact_default_yaml(self):
+        """--compact without --json should default to YAML output."""
+        with patch("rdt_cli.auth.get_credential", return_value=None):
+            with patch("rdt_cli.client.RedditClient.get_post_comments", return_value=self._mock_post_detail()):
+                result = runner.invoke(cli, ["read", "test123", "--compact"])
+                assert result.exit_code == 0
+                # Should contain YAML-style output (not rich tables)
+                assert "test123" in result.output
+                assert "bob" in result.output
+
+    def test_read_help_shows_compact(self):
+        result = runner.invoke(cli, ["read", "--help"])
+        assert result.exit_code == 0
+        assert "--compact" in result.output
+
+    def test_show_help_shows_compact(self):
+        result = runner.invoke(cli, ["show", "--help"])
+        assert result.exit_code == 0
+        assert "--compact" in result.output
+

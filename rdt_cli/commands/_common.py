@@ -122,7 +122,10 @@ def print_yaml(data: Any) -> None:
     try:
         import yaml
 
-        click.echo(yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False))
+        click.echo(yaml.dump(
+            data, allow_unicode=True, default_flow_style=False,
+            sort_keys=False, default_style='"', width=1000,
+        ))
     except ImportError:
         click.echo(json.dumps(data, indent=2, ensure_ascii=False))
 
@@ -311,7 +314,10 @@ def save_output_to_file(data: Any, output_file: str) -> None:
     if ext in ("yml", "yaml"):
         try:
             import yaml
-            text = yaml.dump(payload, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            text = yaml.dump(
+                payload, allow_unicode=True, default_flow_style=False,
+                sort_keys=False, default_style='"', width=1000,
+            )
         except ImportError:
             text = json.dumps(payload, indent=2, ensure_ascii=False)
     else:
@@ -325,6 +331,47 @@ def compact_posts(posts: list[dict]) -> list[dict]:
     """Strip non-essential fields for agent-friendly compact output."""
     keep = {"id", "name", "title", "subreddit", "author", "score", "num_comments", "permalink", "url", "created_utc"}
     return [{k: v for k, v in p.items() if k in keep} for p in posts]
+
+
+def compact_post_detail(detail: Any) -> dict[str, Any]:
+    """Flatten a PostDetail into a compact, agent-friendly structure."""
+    from ..models import PostDetail
+    from ..parser import parse_post_detail
+
+    if not isinstance(detail, PostDetail):
+        detail = parse_post_detail(detail)
+
+    post = detail.post
+    compact_post = {
+        "id": post.id,
+        "title": post.title,
+        "subreddit": post.subreddit,
+        "author": post.author,
+        "score": post.score,
+        "num_comments": post.num_comments,
+        "selftext": post.selftext,
+        "url": post.url,
+        "permalink": post.permalink,
+    }
+
+    def _flatten_comments(comments: list, depth: int = 0) -> list[dict]:
+        flat: list[dict] = []
+        for c in comments:
+            if c.author == "[more]":
+                continue
+            flat.append({
+                "author": c.author,
+                "score": c.score,
+                "body": c.body,
+                "depth": depth,
+            })
+            flat.extend(_flatten_comments(c.replies, depth + 1))
+        return flat
+
+    return {
+        "post": compact_post,
+        "comments": _flatten_comments(detail.comments),
+    }
 
 
 def write_delay() -> None:
