@@ -126,7 +126,7 @@ rdt comment 3 "Great post!"           # Comment on result #3
 
 rdt-cli supports browser cookie extraction to authenticate with Reddit:
 
-1. **Saved cookies** — loads from `~/.config/rdt-cli/credential.json`
+1. **Saved cookies** — loads from `~/.config/rdt-cli/credential.json` (see [Environment Variables](#environment-variables) to override the config directory)
 2. **Browser cookies** — auto-detects installed browsers and extracts cookies (supports Chrome, Firefox, Edge, Brave)
 
 `rdt login` automatically tries all installed browsers and uses the first one with valid cookies.
@@ -149,6 +149,8 @@ After any listing command such as `feed`, `popular`, `all`, `sub`, or `search`, 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OUTPUT` | `auto` | Output format: `json`, `yaml`, `rich`, or `auto` (→ YAML when non-TTY) |
+| `RDT_CONFIG_DIR` | *(unset)* | Override the config directory entirely. Takes priority over `XDG_CONFIG_HOME` and the default path. Useful when running multiple isolated instances that must not share credentials. |
+| `XDG_CONFIG_HOME` | *(unset)* | If set, rdt-cli stores its config under `$XDG_CONFIG_HOME/rdt-cli` per the [XDG Base Directory spec](https://specifications.freedesktop.org/basedir-spec/latest/). Ignored when `RDT_CONFIG_DIR` is set. |
 
 ## Rate Limiting & Anti-Detection
 
