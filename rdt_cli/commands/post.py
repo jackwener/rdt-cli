@@ -14,9 +14,7 @@ from ._common import (
     compact_post_detail,
     console,
     handle_command,
-    maybe_print_structured,
     optional_auth,
-    structured_output_options,
 )
 
 logger = logging.getLogger(__name__)

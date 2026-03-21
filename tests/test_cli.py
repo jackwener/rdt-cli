@@ -798,6 +798,7 @@ class TestYamlSpecialChars:
 
     def test_yaml_with_colons(self):
         import yaml
+
         from rdt_cli.commands._common import print_yaml
 
         data = {"title": "AMC Theatres: a story", "selftext": "key: value inside text"}
@@ -817,6 +818,7 @@ class TestYamlSpecialChars:
 
     def test_yaml_with_special_chars(self):
         import yaml
+
         from rdt_cli.commands._common import print_yaml
 
         data = {
@@ -838,6 +840,7 @@ class TestYamlSpecialChars:
     def test_yaml_roundtrip_envelope(self):
         """Full envelope with special chars should roundtrip."""
         import yaml
+
         from rdt_cli.commands._common import print_yaml, success_payload
 
         payload = success_payload([{
