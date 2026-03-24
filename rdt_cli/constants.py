@@ -1,9 +1,26 @@
 """Constants for Reddit CLI — API endpoints, headers, and config paths."""
 
+import os
 from pathlib import Path
 
+
 # ── Config ──────────────────────────────────────────────────────────
-CONFIG_DIR = Path.home() / ".config" / "rdt-cli"
+def _resolve_config_dir() -> Path:
+    """Resolve config directory with the following priority:
+
+    1. ``RDT_CONFIG_DIR`` env var — explicit override (useful for isolated or
+       multi-user environments where multiple instances must not share config).
+    2. ``XDG_CONFIG_HOME/rdt-cli`` — XDG Base Directory spec (Linux/macOS).
+    3. ``~/.config/rdt-cli`` — historical default, always available as fallback.
+    """
+    if rdt_dir := os.environ.get("RDT_CONFIG_DIR"):
+        return Path(rdt_dir)
+    if xdg_home := os.environ.get("XDG_CONFIG_HOME"):
+        return Path(xdg_home) / "rdt-cli"
+    return Path.home() / ".config" / "rdt-cli"
+
+
+CONFIG_DIR = _resolve_config_dir()
 CREDENTIAL_FILE = CONFIG_DIR / "credential.json"
 
 # ── Base URL ────────────────────────────────────────────────────────
